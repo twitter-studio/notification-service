@@ -97,10 +97,13 @@ export async function cleanupStaleDevices(
     unverifiedBefore: new Date(scheduledTime - UNVERIFIED_DEVICE_RETENTION_MS),
   };
   let deleted = 0;
+  let afterRowid = 0;
   for (let batch = 0; batch < limits.maxBatches; batch++) {
-    const count = await deleteStaleDevices(db, input, limits.batch);
-    deleted += count;
-    if (count < limits.batch) return { deleted, capped: false };
+    const result = await deleteStaleDevices(db, { ...input, afterRowid }, limits.batch);
+    deleted += result.deleted;
+    afterRowid = result.lastRowid;
+    // 選んだ数で決める (選んだ後に登録し直されて消さなかった行があっても、続きを探す)。
+    if (result.selected < limits.batch) return { deleted, capped: false };
   }
   return { deleted, capped: true };
 }
