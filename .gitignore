@@ -10,5 +10,7 @@ coverage/
 .env
 .env.*
 !.env.example
-# APNs の署名の鍵。
+# APNs の署名の鍵と、手で作った鍵のファイル。
 *.p8
+*.key
+key.txt

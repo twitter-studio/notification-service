@@ -9,16 +9,17 @@ export default {
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(
       cleanupAcceptedEvents(env, controller.scheduledTime).then(
-        (deleted) => console.log(JSON.stringify({ event: "accepted_events_cleanup", deleted })),
+        (result) => console.log(JSON.stringify({ event: "accepted_events_cleanup", ...result })),
         (error: unknown) => {
-          // エラーの文はログに出さない (app.ts の onError と同じ)。失敗は Cron の実行の記録に残す。
+          // エラーの文はログに出さない (app.ts の onError と同じ)。元のエラーを投げ直すと、ランタイムが文ごと記録するので、
+          // 決まった文のエラーを投げて、Cron の実行を失敗として残す。
           console.error(
             JSON.stringify({
               event: "accepted_events_cleanup_failed",
               name: error instanceof Error ? error.name : "unknown",
             }),
           );
-          throw error;
+          throw new Error("accepted_events_cleanup_failed");
         },
       ),
     );

@@ -247,3 +247,30 @@ describe("デバイストークンの指紋と形", () => {
     }
   });
 });
+
+describe("鍵の設定の誤り", () => {
+  const checks = { fingerprint: "ded9776b92b0a8e2", keys: { k1: "8242446efc984a7c" } };
+  const keyring = { current: "k1", keys: { k1: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" } };
+
+  it("秘密を置き忘れたときや、長さの合わない Base64 も、鍵の設定の誤りとして扱う", async () => {
+    for (const fingerprintKey of [undefined, "AAAAA="]) {
+      const error = await loadDeviceTokenKeys({
+        DEVICE_TOKEN_KEYS: JSON.stringify(keyring),
+        DEVICE_TOKEN_FINGERPRINT_KEY: fingerprintKey as unknown as string,
+        DEVICE_TOKEN_KEY_CHECKS: JSON.stringify(checks),
+      }).catch((e: unknown) => e);
+      expect(error, String(fingerprintKey)).toBeInstanceOf(DeviceTokenKeyError);
+    }
+  });
+
+  it("current がオブジェクトの元の名前 (constructor など) でも、鍵がないとして拒む", async () => {
+    for (const current of ["constructor", "toString", "__proto__"]) {
+      const error = await loadDeviceTokenKeys({
+        DEVICE_TOKEN_KEYS: JSON.stringify({ ...keyring, current }),
+        DEVICE_TOKEN_FINGERPRINT_KEY: "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+        DEVICE_TOKEN_KEY_CHECKS: JSON.stringify(checks),
+      }).catch((e: unknown) => e);
+      expect(error, current).toBeInstanceOf(DeviceTokenKeyError);
+    }
+  });
+});

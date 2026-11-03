@@ -78,8 +78,10 @@ export async function keyCheckValue(key: Uint8Array<ArrayBuffer>): Promise<strin
 export async function loadDeviceTokenKeys(env: DeviceTokenKeyEnv): Promise<DeviceTokenKeys> {
   const keyring = parseJson(KeyringSchema, env.DEVICE_TOKEN_KEYS, "DEVICE_TOKEN_KEYS");
   const checks = parseJson(KeyChecksSchema, env.DEVICE_TOKEN_KEY_CHECKS, "DEVICE_TOKEN_KEY_CHECKS");
-  if (keyring.keys[keyring.current] === undefined)
+  // 添字 (keyring.keys[current]) で確かめると、current が "constructor" などのときに、オブジェクトの元の値で通ってしまう。
+  if (!Object.hasOwn(keyring.keys, keyring.current)) {
     throw new DeviceTokenKeyError("DEVICE_TOKEN_KEYS: current key is missing");
+  }
 
   const encryptionKeyChecks = new Set<string>();
   const keys = new Map<string, CryptoKey>();
@@ -232,10 +234,17 @@ function parseJson<T>(schema: z.ZodType<T>, json: string, name: string): T {
   }
 }
 
-function decodeKey(encoded: string, name: string): Uint8Array<ArrayBuffer> {
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))
+function decodeKey(encoded: string | undefined, name: string): Uint8Array<ArrayBuffer> {
+  // 秘密を置き忘れたとき (undefined) や長さの合わない Base64 も、鍵の設定の誤りとして扱う。
+  if (encoded === undefined || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
     throw new DeviceTokenKeyError(`${name} is not Base64`);
-  const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+  }
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+  } catch {
+    throw new DeviceTokenKeyError(`${name} is not Base64`);
+  }
   if (bytes.length !== KEY_BYTES)
     throw new DeviceTokenKeyError(`${name} must be ${KEY_BYTES} bytes`);
   return bytes;

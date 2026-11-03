@@ -5,3 +5,6 @@
 DEVICE_TOKEN_KEYS=
 # デバイストークンの指紋 (HMAC-SHA256) の鍵 (32 バイトの Base64)。
 DEVICE_TOKEN_FINGERPRINT_KEY=
+
+# 鍵の確かめの値 (秘密ではない) は wrangler.jsonc の vars にある。手元の鍵で動かすときは、手元の鍵の値を .dev.vars で上書きする。
+# DEVICE_TOKEN_KEY_CHECKS={"fingerprint":"<値>","keys":{"<鍵の ID>":"<値>"}}

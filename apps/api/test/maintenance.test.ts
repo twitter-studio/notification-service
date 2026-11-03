@@ -66,3 +66,23 @@ it("消す記録が多くても、件数を区切ってくり返し、全部消�
     .first<{ count: number }>();
   expect(row?.count).toBe(0);
 });
+
+it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さない", async () => {
+  const ctx = createExecutionContext();
+  const broken = {
+    ...env,
+    DB: {
+      prepare: () => {
+        throw new Error("D1_ERROR: secret detail");
+      },
+    },
+  } as unknown as Env;
+
+  await worker.scheduled(
+    createScheduledController({ scheduledTime: Date.now(), cron: "17 18 * * *" }),
+    broken,
+    ctx,
+  );
+
+  await expect(waitOnExecutionContext(ctx)).rejects.toThrow(/^accepted_events_cleanup_failed$/);
+});
