@@ -3,6 +3,7 @@
 Status: Accepted / 2026-11-04
 
 ## 背景
+
 設計書 v1.1 の §3 に D1 のスキーマの案がある。DB-001 の 2 回のレビュー (notification-service#12) で、案のままや最初の直し方では、次の問題があると分かった。
 - 時刻を `CURRENT_TIMESTAMP` の文字列で持つと、アプリの時刻 (ISO 8601) と文字列で比べたときに、期限の判定がずれる。
 - 端末の登録が、トークンが同じというだけで、ほかのアカウントの端末を自分のものにできる。まだ登録されていないトークンは、知っている人が先に登録できる。
@@ -11,6 +12,7 @@ Status: Accepted / 2026-11-04
 - 外部キーを `ON DELETE CASCADE` にすると、D1 で親の表を作り直す migration (`DROP TABLE`) が、子の行をすべて消す。
 
 ## 決定
+
 - **時刻**: UNIX 時間のミリ秒の整数で持つ (Drizzle の `timestamp_ms`)。時刻はアプリから渡す。既定の値は秒までにし、`unixepoch('subsec')` (SQLite 3.42 以降) に頼らない。
 - **外部キー**: `ON DELETE` は NO ACTION のまま (CASCADE にしない)。アカウントを消すときは、子の行から順に 1 つのバッチで消し、アカウントの行は `deleted` として残す (`deleteAccount`)。
 - **インストール**:
@@ -33,6 +35,7 @@ Status: Accepted / 2026-11-04
 - **受け付けの記録**: 受け付けたあとに送れなかったら、記録を消して (`releaseEvent`)、送り手のやり直しを受け付ける。記録を残す期間は、送り手がやり直す期間より長くする。処理中のやり直しの扱い (処理中の状態) は API-003 で決める。
 
 ## 採らなかった案
+
 - **時刻を ISO 8601 の文字列にそろえる**: 生の SQL で `CURRENT_TIMESTAMP` と比べると、またずれる。DB で形を強制するには、長い CHECK が要る。
 - **同じトークンを、最後に登録したインストールへ移す**: トークンを知っている人が、ほかの人の端末を乗っ取れる。
 - **最初に登録したインストールに固定する**: 先取りした人が、本物の端末の登録を、ずっと妨げられる。
@@ -40,6 +43,7 @@ Status: Accepted / 2026-11-04
 - **外部キーを CASCADE にする**: 親の表を作り直す migration で、本番の子の行がすべて消える (`PRAGMA defer_foreign_keys` は確かめを遅らせるだけで、CASCADE の削除は止めない)。
 
 ## 影響
+
 - D1 で親の表を作り直す migration は、drizzle-kit が出す `PRAGMA foreign_keys=OFF` が効かない (D1 はトランザクションの中で外部キーを確かめ続ける)。その場合だけ、作った SQL を `PRAGMA defer_foreign_keys = on` に直す。外部キーが NO ACTION なので、行は残る (AGENTS.md)。
 - テスト (`apps/api/test/db/migrations.test.ts`) は、0000 の形で入れたデータが、後の migration を当てたあとも残ることを確かめる。
 - CI で `drizzle-kit generate` を動かし、`schema.ts` と migration がずれていないことを確かめる。
