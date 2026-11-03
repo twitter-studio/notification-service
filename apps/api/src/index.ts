@@ -8,25 +8,31 @@ import {
 
 const app = createApp();
 
+/** 定期の掃除の Cron の式 (wrangler.jsonc の triggers.crons と同じ)。1 つの式で、4 つの分に発火させる。 */
+const CLEANUP_CRON = "17,27,37,47 18 * * *";
+
 /**
- * Cron の式ごとの掃除 (wrangler.jsonc の triggers.crons と同じ)。1 回の呼び出しで D1 に投げる問い合わせの数に上限があるので
- * (無料のプランで 50)、掃除ごとに呼び出しを分ける。
+ * 発火した分ごとの掃除。1 回の呼び出しで D1 に投げる問い合わせの数に上限があるので (無料のプランで 50)、掃除ごとに呼び出しを分ける。
+ * 式を 1 つにまとめ、無料のプランの Cron の枠 (アカウントに 5 つ) を 1 つしか使わない。
  */
 const CLEANUPS: Record<
-  string,
+  number,
   { name: string; run: (env: Env, time: number) => Promise<unknown> }
 > = {
-  "17 18 * * *": { name: "accepted_events", run: cleanupAcceptedEvents },
-  "27 18 * * *": { name: "auth_records", run: cleanupExpiredAuthRecords },
-  "37 18 * * *": { name: "stale_devices", run: cleanupStaleDevices },
-  "47 18 * * *": { name: "abandoned_accounts", run: cleanupAbandonedAccounts },
+  17: { name: "accepted_events", run: cleanupAcceptedEvents },
+  27: { name: "auth_records", run: cleanupExpiredAuthRecords },
+  37: { name: "stale_devices", run: cleanupStaleDevices },
+  47: { name: "abandoned_accounts", run: cleanupAbandonedAccounts },
 };
 
 // 名前付きの export は置かない。Workers では、名前付きの export が別の入口 (entrypoint) として呼べてしまうため。
 export default {
   fetch: app.fetch,
   async scheduled(controller, env, ctx) {
-    const cleanup = CLEANUPS[controller.cron];
+    const cleanup =
+      controller.cron === CLEANUP_CRON
+        ? CLEANUPS[new Date(controller.scheduledTime).getUTCMinutes()]
+        : undefined;
     if (cleanup === undefined) {
       // wrangler.jsonc と CLEANUPS がずれている。式は秘密ではないので、ログに出す。
       console.error(JSON.stringify({ event: "unknown_cron", cron: controller.cron }));

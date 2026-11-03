@@ -10,11 +10,20 @@ import {
   disableDeviceByUser,
   findAbandonedAccounts,
   findActiveRelayCredential,
+  invalidateDevice,
   listActiveDevices,
   revokeInstallation,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
-import { newAccount, registerToken, registerVerified, testDb, testHash, unique } from "./helpers";
+import {
+  fingerprintOf,
+  newAccount,
+  registerToken,
+  registerVerified,
+  testDb,
+  testHash,
+  unique,
+} from "./helpers";
 
 async function count(table: string, column: string, value: string) {
   const row = await env.DB.prepare(`SELECT count(*) AS count FROM ${table} WHERE ${column} = ?`)
@@ -199,6 +208,46 @@ describe("使われなくなったアカウント", () => {
         true,
       );
     }
+  });
+
+  it("確かめを外された端末 (ほかのインストールに引き継がれた) と、取り消した資格情報の利用では、使ったとはみなさない", async () => {
+    const db = testDb();
+    const takenOver = await newAccount(db);
+    const token = unique("token");
+    await registerVerified(db, takenOver, token);
+    // 鍵をなくして登録し直した新しいインストールが、同じトークンを確かめた。前の行は確かめを外され、有効のまま残る。
+    await registerVerified(db, await newAccount(db), token);
+    const revokedCredential = await newAccount(db);
+    await registerVerified(db, revokedCredential, unique("token"));
+    await env.DB.prepare("UPDATE relay_credentials SET revoked_at = ? WHERE account_id = ?")
+      .bind(now.getTime(), revokedCredential.accountId)
+      .run();
+    for (const account of [takenOver, revokedCredential]) {
+      await setInstallationUsed(account.installationId, longAgo);
+      await env.DB.prepare("UPDATE relay_credentials SET last_used_at = ? WHERE account_id = ?")
+        .bind(now.getTime(), account.accountId)
+        .run();
+
+      expect(await deleteAbandonedAccount(db, { accountId: account.accountId, since }, now)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("APNs が無効と返した確かめた端末は、端末の掃除で消えるまで、送れる端末に数える", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const token = unique("token");
+    const device = await registerVerified(db, alice, token);
+    await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(token) });
+    await setInstallationUsed(alice.installationId, longAgo);
+    await env.DB.prepare("UPDATE relay_credentials SET last_used_at = ? WHERE account_id = ?")
+      .bind(now.getTime(), alice.accountId)
+      .run();
+
+    expect(await deleteAbandonedAccount(db, { accountId: alice.accountId, since }, now)).toBe(
+      false,
+    );
   });
 
   it("取り消したインストールは、取り消した時刻から期間のあいだ残す", async () => {

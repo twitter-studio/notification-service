@@ -165,9 +165,11 @@ export async function cleanupAbandonedAccounts(
       try {
         if (await deleteAbandonedAccount(db, { accountId, since }, now)) deleted++;
       } catch (error) {
+        // アカウントの ID はランダムな UUID で、秘密ではない (どのアカウントで失敗したかを追えるように出す)。
         console.error(
           JSON.stringify({
             event: "abandoned_account_cleanup_failed",
+            account_id: accountId,
             name: error instanceof Error ? error.name : "unknown",
           }),
         );

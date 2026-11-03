@@ -133,9 +133,10 @@ export const ABANDONED_ACCOUNT_AFTER_MS = 180 * 24 * 60 * 60 * 1000;
  * 次のどれもない。
  * - アプリが使ったインストール (`last_used_at`)。取り消したインストールは、取り消した時刻も使った時刻とみなす (取り消した鍵での
  *   登録し直しを拒む 403 を、取り消してから期間のあいだ続けるため)。
- * - 使われた、取り消していない中継の資格情報で、アカウントに送れる端末 (有効で、確かめたもの) があるもの。アプリを開かずに通知だけを
- *   受けている利用者は消さない。送れる端末のないアカウントの資格情報 (鍵をなくした後の古い資格情報、漏れた資格情報) が使われても、
- *   使ったとはみなさない。
+ * - 使われた、取り消していない中継の資格情報で、アカウントに送れる端末 (確かめた端末で、有効なもの) があるもの。アプリを開かずに
+ *   通知だけを受けている利用者は消さない。送れる端末のないアカウントの資格情報 (鍵をなくした後の古い資格情報、漏れた資格情報) が
+ *   使われても、使ったとはみなさない。APNs が無効と返した確かめた端末も、端末の掃除で消えるまで (30 日) は送れる端末に数える
+ *   (サーバーの設定の誤り、sandbox と production の取り違えなどでも無効と返るので、その夜に利用者を消さないため)。
  */
 function abandoned(since: string): string {
   return `
@@ -153,7 +154,7 @@ function abandoned(since: string): string {
         SELECT 1 FROM devices
         INNER JOIN installations ON installations.id = devices.installation_id
         WHERE installations.account_id = notification_accounts.id AND installations.revoked_at IS NULL
-          AND devices.state = 'active' AND devices.verified_at IS NOT NULL))`;
+          AND devices.state IN ('active', 'invalidated') AND devices.verified_at IS NOT NULL))`;
 }
 
 /** 使われなくなったアカウントを、`afterRowid` より後ろ (rowid の順) から `limit` 件まで探す。 */

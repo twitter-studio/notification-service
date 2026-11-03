@@ -27,6 +27,10 @@ import {
   REVOKED_RELAY_CREDENTIAL_RETENTION_MS,
 } from "../src/maintenance";
 import { CLOCK_SKEW_MS } from "../src/security/challenge";
+
+/** wrangler.jsonc の triggers.crons と同じ式。 */
+const CLEANUP_CRON = "17,27,37,47 18 * * *";
+
 import { testHash } from "./db/helpers";
 
 async function newAccount() {
@@ -40,7 +44,7 @@ async function newAccount() {
 async function runCleanup(scheduledTime: number) {
   const ctx = createExecutionContext();
   await worker.scheduled(
-    createScheduledController({ scheduledTime, cron: "17 18 * * *" }),
+    createScheduledController({ scheduledTime, cron: CLEANUP_CRON }),
     env,
     ctx,
   );
@@ -248,7 +252,10 @@ it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さ
   } as unknown as Env;
 
   await worker.scheduled(
-    createScheduledController({ scheduledTime: Date.now(), cron: "17 18 * * *" }),
+    createScheduledController({
+      scheduledTime: Date.parse("2026-11-10T18:17:00.000Z"),
+      cron: CLEANUP_CRON,
+    }),
     broken,
     ctx,
   );
@@ -278,18 +285,21 @@ it("定期の掃除で、使われなくなったアカウントを消し、最�
   });
 });
 
-it("Cron の式ごとに、決まった掃除だけを動かす。知らない式は失敗にする", async () => {
+it("Cron の発火した分ごとに、決まった掃除だけを動かす。知らない式と分は失敗にする", async () => {
   const logs = vi.spyOn(console, "log").mockImplementation(() => {});
-  for (const [cron, name] of [
-    ["17 18 * * *", "accepted_events"],
-    ["27 18 * * *", "auth_records"],
-    ["37 18 * * *", "stale_devices"],
-    ["47 18 * * *", "abandoned_accounts"],
+  for (const [minute, name] of [
+    [17, "accepted_events"],
+    [27, "auth_records"],
+    [37, "stale_devices"],
+    [47, "abandoned_accounts"],
   ] as const) {
     logs.mockClear();
     const ctx = createExecutionContext();
     await worker.scheduled(
-      createScheduledController({ scheduledTime: Date.now(), cron }),
+      createScheduledController({
+        scheduledTime: Date.UTC(2026, 10, 4, 18, minute),
+        cron: CLEANUP_CRON,
+      }),
       env,
       ctx,
     );
@@ -302,13 +312,18 @@ it("Cron の式ごとに、決まった掃除だけを動かす。知らない�
   logs.mockRestore();
 
   const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-  await expect(
-    worker.scheduled(
-      createScheduledController({ scheduledTime: Date.now(), cron: "0 0 * * *" }),
-      env,
-      createExecutionContext(),
-    ),
-  ).rejects.toThrow(/unknown_cron/);
+  for (const [cron, minute] of [
+    ["0 0 * * *", 17],
+    [CLEANUP_CRON, 18],
+  ] as const) {
+    await expect(
+      worker.scheduled(
+        createScheduledController({ scheduledTime: Date.UTC(2026, 10, 4, 18, minute), cron }),
+        env,
+        createExecutionContext(),
+      ),
+    ).rejects.toThrow(/unknown_cron/);
+  }
   errors.mockRestore();
 });
 
