@@ -4,6 +4,7 @@ import { installationsOf } from "./devices";
 import {
   deliveryDedup,
   devices,
+  deviceVerifications,
   installations,
   notificationAccounts,
   relayCredentials,
@@ -25,7 +26,7 @@ export async function revokeInstallation(
     eq(installations.accountId, input.accountId),
     isNull(installations.revokedAt),
   );
-  const [, , , revoked] = await db.batch([
+  const [, , , , revoked] = await db.batch([
     db
       .delete(sessions)
       .where(
@@ -37,6 +38,23 @@ export async function revokeInstallation(
           ),
         ),
       ),
+    db.delete(deviceVerifications).where(
+      inArray(
+        deviceVerifications.deviceId,
+        db
+          .select({ id: devices.id })
+          .from(devices)
+          .where(
+            and(
+              eq(devices.installationId, input.installationId),
+              inArray(
+                devices.installationId,
+                db.select({ id: installations.id }).from(installations).where(owned),
+              ),
+            ),
+          ),
+      ),
+    ),
     db
       .delete(devices)
       .where(
@@ -78,6 +96,15 @@ export async function deleteAccount(
 ): Promise<boolean> {
   const results = await db.batch([
     db.delete(deliveryDedup).where(eq(deliveryDedup.accountId, input.accountId)),
+    db.delete(deviceVerifications).where(
+      inArray(
+        deviceVerifications.deviceId,
+        db
+          .select({ id: devices.id })
+          .from(devices)
+          .where(inArray(devices.installationId, installationsOf(db, input.accountId))),
+      ),
+    ),
     db.delete(devices).where(inArray(devices.installationId, installationsOf(db, input.accountId))),
     db.delete(relayCredentials).where(eq(relayCredentials.accountId, input.accountId)),
     db.delete(sessions).where(eq(sessions.accountId, input.accountId)),
@@ -93,5 +120,5 @@ export async function deleteAccount(
       )
       .returning({ id: notificationAccounts.id }),
   ]);
-  return results[5].length > 0;
+  return results[6].length > 0;
 }

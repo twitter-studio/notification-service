@@ -37,6 +37,8 @@
     "crons": ["17 18 * * *"]
   },
   "vars": {
+    // 端末の登録で受け付ける topic (Bundle ID)。カンマ区切り (ADR-0008)。
+    "APNS_TOPICS": "com.twitter-studio.Tweetbot",
     // 鍵の確かめの値 (秘密ではない。ADR-0005)。本番の鍵を作ったら、scripts/key-check.mjs で作った値に置き換える。
     // 空のままでは、鍵を読むときに失敗する (確かめずに鍵を使わないため)。
     "DEVICE_TOKEN_KEY_CHECKS": "{\"fingerprint\":\"\",\"keys\":{}}"

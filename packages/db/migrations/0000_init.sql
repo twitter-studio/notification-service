@@ -7,6 +7,19 @@ CREATE TABLE `delivery_dedup` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_delivery_dedup_accepted` ON `delivery_dedup` (`accepted_at`);--> statement-breakpoint
+CREATE TABLE `device_verifications` (
+	`device_id` text PRIMARY KEY NOT NULL,
+	`code_hash` text NOT NULL,
+	`token_fingerprint` text NOT NULL,
+	`apns_environment` text NOT NULL,
+	`topic` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`created_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
+	FOREIGN KEY (`device_id`) REFERENCES `devices`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "device_verifications_code_hash" CHECK(length("device_verifications"."code_hash") = 43 AND "device_verifications"."code_hash" NOT GLOB '*[^A-Za-z0-9_-]*')
+);
+--> statement-breakpoint
+CREATE INDEX `idx_device_verifications_expires` ON `device_verifications` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `devices` (
 	`id` text PRIMARY KEY NOT NULL,
 	`installation_id` text NOT NULL,

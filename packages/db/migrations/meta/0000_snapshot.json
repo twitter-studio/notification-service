@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b8880c38-3d87-4331-aa3a-4bf42b324252",
+  "id": "38d766de-7e31-46d7-91b0-4eff1b6a41f6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -56,6 +56,87 @@
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "device_verifications": {
+      "name": "device_verifications",
+      "columns": {
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_fingerprint": {
+          "name": "token_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "apns_environment": {
+          "name": "apns_environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "topic": {
+          "name": "topic",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        }
+      },
+      "indexes": {
+        "idx_device_verifications_expires": {
+          "name": "idx_device_verifications_expires",
+          "columns": ["expires_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "device_verifications_device_id_devices_id_fk": {
+          "name": "device_verifications_device_id_devices_id_fk",
+          "tableFrom": "device_verifications",
+          "tableTo": "devices",
+          "columnsFrom": ["device_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "device_verifications_code_hash": {
+          "name": "device_verifications_code_hash",
+          "value": "length(\"device_verifications\".\"code_hash\") = 43 AND \"device_verifications\".\"code_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
+        }
+      }
     },
     "devices": {
       "name": "devices",

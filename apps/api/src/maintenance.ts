@@ -2,6 +2,7 @@ import {
   createDb,
   deleteAcceptedEventsBefore,
   deleteExpiredAuthRecords,
+  deleteExpiredDeviceVerifications,
   deleteRevokedRelayCredentials,
 } from "@notification-service/db";
 import { CLOCK_SKEW_MS } from "./security/challenge";
@@ -45,8 +46,8 @@ export async function cleanupAcceptedEvents(
 }
 
 /**
- * 定期の掃除 (Cron)。期限を過ぎた使ったチャレンジとセッションの記録と、取り消してから残す期間を過ぎた中継の資格情報を、
- * 件数を区切って消す。
+ * 定期の掃除 (Cron)。期限を過ぎた使ったチャレンジ、セッション、端末の確かめの記録と、取り消してから残す期間を過ぎた中継の
+ * 資格情報を、件数を区切って消す。
  * 期限から時計のずれの幅を過ぎたものだけを消す。時計の遅れたサーバーがまだ受けるチャレンジの記録を消すと、使い回せてしまう。
  */
 export async function cleanupExpiredAuthRecords(
@@ -61,9 +62,10 @@ export async function cleanupExpiredAuthRecords(
   for (let batch = 0; batch < limits.maxBatches; batch++) {
     const { challenges, sessions } = await deleteExpiredAuthRecords(db, cutoff, limits.batch);
     const credentials = await deleteRevokedRelayCredentials(db, revokedBefore, limits.batch);
-    deleted += challenges + sessions + credentials;
+    const verifications = await deleteExpiredDeviceVerifications(db, cutoff, limits.batch);
+    deleted += challenges + sessions + credentials + verifications;
     // どの表も、区切りの件数より少なければ、消し残しはない。
-    if (challenges < limits.batch && sessions < limits.batch && credentials < limits.batch)
+    if ([challenges, sessions, credentials, verifications].every((count) => count < limits.batch))
       return { deleted, capped: false };
   }
   return { deleted, capped: true };

@@ -4,9 +4,10 @@ import { toBase64Url } from "./encoding";
 // セッションと中継の資格情報 (高エントロピーの bearer)。DB にはハッシュだけを置き、平文は作ったときに 1 回だけ返す (ADR-0006)。
 // 32 バイトの乱数なので、鍵のない SHA-256 で十分 (総当たりで探せない)。秘密の走査で見つけやすいよう、頭に用途の印を付ける。
 
-export type BearerKind = "session" | "relay";
+/** session と relay は bearer、verification は端末のトークンを持っていることの確かめの code (push で送る)。 */
+export type BearerKind = "session" | "relay" | "verification";
 
-const PREFIX: Record<BearerKind, string> = { session: "tss_", relay: "tsr_" };
+const PREFIX: Record<BearerKind, string> = { session: "tss_", relay: "tsr_", verification: "tsv_" };
 
 export function newBearerToken(kind: BearerKind): string {
   return `${PREFIX[kind]}${toBase64Url(crypto.getRandomValues(new Uint8Array(32)))}`;
