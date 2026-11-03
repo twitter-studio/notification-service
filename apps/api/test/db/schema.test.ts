@@ -24,8 +24,8 @@ describe("D1 のスキーマ", () => {
         "INSERT INTO installations (id, account_id, public_key) VALUES (?, ?, ?)",
       ).bind(unique("installation"), missing, unique("key")),
       env.DB.prepare(
-        "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic) VALUES (?, ?, 'c', ?, 'sandbox', 't')",
-      ).bind(unique("device"), missing, unique("fingerprint")),
+        "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic) VALUES (?, ?, 'v1.c', ?, 'sandbox', 't')",
+      ).bind(unique("device"), missing, `f1.${unique("fingerprint")}`),
       env.DB.prepare(
         "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES (?, ?, ?)",
       ).bind(unique("credential"), missing, unique("hash")),
@@ -41,11 +41,16 @@ describe("D1 のスキーマ", () => {
 
   it("アカウントの状態、APNs の環境、端末の状態、確かめの状態は、決めた値しか入らない", async () => {
     const account = await newAccount(testDb());
-    const insertDevice = (environment: string, state: string) =>
+    const insertDevice = (
+      environment: string,
+      state: string,
+      ciphertext = "v1.c",
+      fingerprint = `f1.${unique("fingerprint")}`,
+    ) =>
       env.DB.prepare(
-        "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, state) VALUES (?, ?, 'c', ?, ?, 't', ?)",
+        "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, state) VALUES (?, ?, ?, ?, ?, 't', ?)",
       )
-        .bind(unique("device"), account.installationId, unique("fingerprint"), environment, state)
+        .bind(unique("device"), account.installationId, ciphertext, fingerprint, environment, state)
         .run();
 
     await expect(
@@ -60,6 +65,11 @@ describe("D1 のスキーマ", () => {
     ).rejects.toThrow(/CHECK/);
     await expect(insertDevice("staging", "active")).rejects.toThrow(/CHECK/);
     await expect(insertDevice("sandbox", "paused")).rejects.toThrow(/CHECK/);
+    // 平文のトークンや、版の付いていない指紋は置けない。
+    await expect(insertDevice("sandbox", "active", "a".repeat(64))).rejects.toThrow(/CHECK/);
+    await expect(insertDevice("sandbox", "active", "v1.c", "plain-fingerprint")).rejects.toThrow(
+      /CHECK/,
+    );
   });
 
   it("時刻の既定の値は、UNIX 時間のミリ秒の整数で入る", async () => {

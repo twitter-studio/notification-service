@@ -93,6 +93,9 @@ export const devices = sqliteTable(
       .where(sql`${t.verifiedAt} IS NOT NULL`),
     index("idx_devices_token").on(t.tokenFingerprint, t.apnsEnvironment, t.topic),
     check("devices_apns_environment", sql`${t.apnsEnvironment} IN ('sandbox', 'production')`),
+    // 平文のトークンを置かないよう、暗号文と指紋の形 (版の付いた形) を確かめる (ADR-0005)。
+    check("devices_apns_token_ciphertext", sql`${t.apnsTokenCiphertext} GLOB 'v[0-9]*.*'`),
+    check("devices_token_fingerprint", sql`${t.tokenFingerprint} GLOB 'f[0-9]*.*'`),
     check("devices_state", sql`${t.state} IN ('active', 'disabled_by_user', 'invalidated')`),
   ],
 );

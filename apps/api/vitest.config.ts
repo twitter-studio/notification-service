@@ -20,6 +20,10 @@ export default defineConfig(async () => {
               keys: { "test-1": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" },
             }),
             DEVICE_TOKEN_FINGERPRINT_KEY: "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+              fingerprint: "ded9776b92b0a8e2",
+              keys: { "test-1": "8242446efc984a7c" },
+            }),
           },
           // migration をデータの入った D1 に当てるテストのための、テストだけの D1。
           d1Databases: { MIGRATION_DB: "migration-test" },

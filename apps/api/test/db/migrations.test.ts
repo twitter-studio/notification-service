@@ -18,7 +18,7 @@ it("データの入った D1 に後の migration を当てても、行が消え�
       "INSERT INTO installations (id, account_id, public_key) VALUES ('installation', 'account', 'key')",
     ),
     db.prepare(
-      "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, verified_at) VALUES ('device', 'installation', 'c', 'f', 'sandbox', 't', 1)",
+      "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, verified_at) VALUES ('device', 'installation', 'v1.c', 'f1.f', 'sandbox', 't', 1)",
     ),
     db.prepare(
       "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES ('credential', 'account', 'hash')",

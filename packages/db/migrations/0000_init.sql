@@ -19,6 +19,8 @@ CREATE TABLE `devices` (
 	`updated_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
 	FOREIGN KEY (`installation_id`) REFERENCES `installations`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "devices_apns_environment" CHECK("devices"."apns_environment" IN ('sandbox', 'production')),
+	CONSTRAINT "devices_apns_token_ciphertext" CHECK("devices"."apns_token_ciphertext" GLOB 'v[0-9]*.*'),
+	CONSTRAINT "devices_token_fingerprint" CHECK("devices"."token_fingerprint" GLOB 'f[0-9]*.*'),
 	CONSTRAINT "devices_state" CHECK("devices"."state" IN ('active', 'disabled_by_user', 'invalidated'))
 );
 --> statement-breakpoint

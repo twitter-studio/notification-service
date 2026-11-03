@@ -14,9 +14,14 @@
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
-  // 受け付けの記録の定期の掃除 (src/maintenance.ts)。1 日 1 回、混み合う時刻を避ける。
+  // 受け付けの記録の定期の掃除 (src/maintenance.ts)。1 日 1 回。Cron は UTC なので、日本時間の 3:17。
   "triggers": {
-    "crons": ["17 3 * * *"]
+    "crons": ["17 18 * * *"]
+  },
+  "vars": {
+    // 鍵の確かめの値 (秘密ではない。ADR-0005)。本番の鍵を作ったら、scripts/key-check.mjs で作った値に置き換える。
+    // 空のままでは、鍵を読むときに失敗する (確かめずに鍵を使わないため)。
+    "DEVICE_TOKEN_KEY_CHECKS": "{\"fingerprint\":\"\",\"keys\":{}}"
   },
   "observability": {
     "enabled": true

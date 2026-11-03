@@ -185,7 +185,7 @@ describe("端末の登録", () => {
       await markDeviceVerified(db, {
         accountId: stranger.accountId,
         deviceId: strangerDevice,
-        tokenFingerprint: "other",
+        tokenFingerprint: fingerprintOf("other"),
         apnsEnvironment: "sandbox",
         topic: TOPIC,
       }),
