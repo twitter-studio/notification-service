@@ -24,7 +24,7 @@ import {
   verifyInstallationSignature,
 } from "../security/installation-key";
 import { clientAddressKey, enforceRateLimit } from "../security/rate-limit";
-import { commonProblems, problemResponse } from "./openapi";
+import { commonProblems, idSchema, problemResponse } from "./openapi";
 
 // 端末の登録と、セッションの作り直し (設計書 §3 の手順 1〜3、ADR-0006)。
 
@@ -36,6 +36,7 @@ const SessionSchema = z.object({ token: z.string(), expires_at: z.string() }).op
 const challengeRoute = createRoute({
   method: "post",
   path: "/v1/enrollments/challenge",
+  operationId: "issueChallenge",
   summary:
     "登録、セッションの作り直し、中継の資格情報の入れ替え、端末の登録で、端末の鍵に署名させるチャレンジを出す",
   request: {
@@ -43,9 +44,9 @@ const challengeRoute = createRoute({
       required: true,
       content: {
         "application/json": {
-          schema: z.object({
-            purpose: z.enum(["enroll", "session", "relay_credential", "device"]),
-          }),
+          schema: z
+            .object({ purpose: z.enum(["enroll", "session", "relay_credential", "device"]) })
+            .openapi("ChallengeRequest"),
         },
       },
     },
@@ -66,6 +67,7 @@ const challengeRoute = createRoute({
 const enrollRoute = createRoute({
   method: "post",
   path: "/v1/enrollments",
+  operationId: "enroll",
   summary: "端末を登録し、アカウント、セッション、中継の資格情報を作る",
   request: {
     body: {
@@ -125,6 +127,7 @@ const enrollRoute = createRoute({
 const sessionRoute = createRoute({
   method: "post",
   path: "/v1/sessions",
+  operationId: "createSession",
   summary: "端末の鍵の署名で、セッションを作り直す",
   request: {
     body: {
@@ -133,7 +136,7 @@ const sessionRoute = createRoute({
         "application/json": {
           schema: z
             .object({
-              installation_id: z.uuid(),
+              installation_id: idSchema("インストールの ID"),
               challenge: z.string().max(512),
               signature: z.string().max(128),
             })
@@ -145,7 +148,11 @@ const sessionRoute = createRoute({
   responses: {
     201: {
       description: "セッション",
-      content: { "application/json": { schema: z.object({ session: SessionSchema }) } },
+      content: {
+        "application/json": {
+          schema: z.object({ session: SessionSchema }).openapi("SessionResult"),
+        },
+      },
     },
     401: problemResponse("チャレンジ、インストール、署名のどれかが正しくない"),
     409: problemResponse("チャレンジはもう使われた"),

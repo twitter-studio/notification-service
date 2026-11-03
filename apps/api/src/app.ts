@@ -79,6 +79,17 @@ export function createApp(options: AppOptions = {}) {
     "/v1/*",
     bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => problem(c, 413, "Content Too Large") }),
   );
+  // 認証の形 (OpenAPI の文書に書く)。どちらも Authorization: Bearer で送る。
+  app.openAPIRegistry.registerComponent("securitySchemes", "session", {
+    type: "http",
+    scheme: "bearer",
+    description: "アカウントのセッション (tss_…、1 時間。ADR-0006)",
+  });
+  app.openAPIRegistry.registerComponent("securitySchemes", "relay", {
+    type: "http",
+    scheme: "bearer",
+    description: "中継の資格情報 (tsr_…。利用者の Worker が使う。ADR-0007)",
+  });
   registerHealth(app);
   registerEnrollment(app);
   registerRelayCredentials(app);
