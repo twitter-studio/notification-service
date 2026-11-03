@@ -1,4 +1,8 @@
-import { createDb, deleteAcceptedEventsBefore } from "@notification-service/db";
+import {
+  createDb,
+  deleteAcceptedEventsBefore,
+  deleteExpiredAuthRecords,
+} from "@notification-service/db";
 
 /**
  * 受け付けの記録 (重複の除去) を残す期間。送り手 (利用者の Worker) がやり直す期間より長くする。
@@ -29,6 +33,26 @@ export async function cleanupAcceptedEvents(
     const count = await deleteAcceptedEventsBefore(db, cutoff, DELETE_BATCH);
     deleted += count;
     if (count < DELETE_BATCH) return { deleted, capped: false };
+  }
+  return { deleted, capped: true };
+}
+
+/** 定期の掃除 (Cron)。期限を過ぎた使ったチャレンジとセッションの記録を、件数を区切って消す。 */
+export async function cleanupExpiredAuthRecords(
+  env: Env,
+  scheduledTime: number,
+): Promise<CleanupResult> {
+  const db = createDb(env.DB);
+  let deleted = 0;
+  for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    const { challenges, sessions } = await deleteExpiredAuthRecords(
+      db,
+      new Date(scheduledTime),
+      DELETE_BATCH,
+    );
+    deleted += challenges + sessions;
+    // どちらの表も、区切りの件数より少なければ、消し残しはない。
+    if (challenges < DELETE_BATCH && sessions < DELETE_BATCH) return { deleted, capped: false };
   }
   return { deleted, capped: true };
 }

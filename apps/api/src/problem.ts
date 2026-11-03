@@ -25,3 +25,18 @@ export function problem(
   };
   return c.body(JSON.stringify(body), status, { "Content-Type": "application/problem+json" });
 }
+
+/**
+ * 型の付いた入口 (zod-openapi) の中から、problem+json の応答を返すための例外。入口が返すのは宣言した成功の応答だけにし、
+ * 失敗はこれを投げて、アプリのエラーの処理 (app.ts の onError) で problem+json にする。
+ */
+export class ProblemError extends Error {
+  override name = "ProblemError";
+  constructor(
+    readonly status: ContentfulStatusCode,
+    readonly title: string,
+    readonly detail?: string,
+  ) {
+    super(title);
+  }
+}

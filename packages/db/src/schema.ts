@@ -130,3 +130,39 @@ export const deliveryDedup = sqliteTable(
     index("idx_delivery_dedup_accepted").on(t.acceptedAt),
   ],
 );
+
+/**
+ * 使ったチャレンジ (登録やセッションの作り直しで、署名したもの)。同じチャレンジを 2 回使わせないため。
+ * チャレンジそのものはサーバーの秘密で署名した値で、出すときには DB に書かない (名前を名乗らない呼び出しで書き込みを使わせない)。
+ * 使ったときだけここに書き、期限を過ぎたら定期の掃除で消す (ADR-0006)。
+ */
+export const usedChallenges = sqliteTable(
+  "used_challenges",
+  {
+    nonce: text("nonce").primaryKey(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (t) => [index("idx_used_challenges_expires").on(t.expiresAt)],
+);
+
+/** アカウントのセッション (短命の bearer)。DB にはハッシュだけを置く (ADR-0006)。 */
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => notificationAccounts.id),
+    installationId: text("installation_id")
+      .notNull()
+      .references(() => installations.id),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: timestamp("created_at").notNull().default(now),
+    expiresAt: timestamp("expires_at").notNull(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (t) => [
+    index("idx_sessions_account").on(t.accountId),
+    index("idx_sessions_expires").on(t.expiresAt),
+  ],
+);

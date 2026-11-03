@@ -61,4 +61,25 @@ CREATE TABLE `relay_credentials` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `relay_credentials_secret_hash_unique` ON `relay_credentials` (`secret_hash`);--> statement-breakpoint
-CREATE INDEX `idx_relay_credentials_account` ON `relay_credentials` (`account_id`);
+CREATE INDEX `idx_relay_credentials_account` ON `relay_credentials` (`account_id`);--> statement-breakpoint
+CREATE TABLE `sessions` (
+	`id` text PRIMARY KEY NOT NULL,
+	`account_id` text NOT NULL,
+	`installation_id` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`created_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
+	`expires_at` integer NOT NULL,
+	`revoked_at` integer,
+	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`installation_id`) REFERENCES `installations`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `sessions_token_hash_unique` ON `sessions` (`token_hash`);--> statement-breakpoint
+CREATE INDEX `idx_sessions_account` ON `sessions` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_sessions_expires` ON `sessions` (`expires_at`);--> statement-breakpoint
+CREATE TABLE `used_challenges` (
+	`nonce` text PRIMARY KEY NOT NULL,
+	`expires_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `idx_used_challenges_expires` ON `used_challenges` (`expires_at`);

@@ -102,6 +102,8 @@ pnpm build       # wrangler deploy --dry-run。デプロイはしない
 - Node.js の版は `mise.toml` と `.github/workflows/ci.yml` の 2 か所にある。そろえて上げる (ADR-0003)。
 - 公開の API は `@hono/zod-openapi` のスキーマで先に決め、生成したものを手で直さない。エラーの応答は `src/problem.ts` の problem+json にし、`request_id` はサーバーで作る。エラーの文は応答にもログにも出さない。
 - APNs のデバイストークンは、`src/security/device-token.ts` の `sealDeviceToken` で、端末の行に結び付けて暗号化し、版の付いた指紋 (HMAC) と一緒に DB に置く (ADR-0005)。DB の関数はブランドの型で受け、DB も形を CHECK で確かめる。鍵は確かめの値 (`DEVICE_TOKEN_KEY_CHECKS`、`scripts/key-check.mjs` で作る) と比べてから使う。暗号化の鍵の入れ替えは 2 段で行い (足してから current にする)、古い鍵は古い暗号文がなくなるまで残す。指紋の鍵は入れ替えない。トークン、鍵、暗号文、指紋は、ログにもエラーの文にも出さない。
+- 登録とセッションの約束事 (チャレンジ、端末の鍵の署名、トークン) は ADR-0006。試作のあいだは、招待のコード (`ENROLLMENT_INVITE_CODE`) がないと登録できない。App Attest を確かめるまで (AUTH-003) この制限を外さない。
+- 型の付いた入口 (zod-openapi) からは、宣言した成功の応答だけを返し、失敗は `ProblemError` を投げる (app.ts の onError が problem+json にする)。アカウントのセッションが要る入口には `requireSession` を付ける。
 - `observability` のログにはリクエストのヘッダーも残る。秘密を独自のヘッダーで受けるときは、ログに残らないかを確かめる。
 - `wrangler deploy` を `--dry-run` なしで動かさない (デプロイはオーナーの承認を得てから)。Cloudflare の資格情報と秘密は、このリポジトリに置かない。
 - `GET /health` などの公開の応答に、版、設定、秘密の有無を出さない。

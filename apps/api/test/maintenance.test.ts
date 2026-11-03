@@ -84,5 +84,5 @@ it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さ
     ctx,
   );
 
-  await expect(waitOnExecutionContext(ctx)).rejects.toThrow(/^accepted_events_cleanup_failed$/);
+  await expect(waitOnExecutionContext(ctx)).rejects.toThrow(/^cleanup_failed$/);
 });

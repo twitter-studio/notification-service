@@ -7,6 +7,7 @@ import {
   installations,
   notificationAccounts,
   relayCredentials,
+  sessions,
 } from "./schema";
 
 /**
@@ -23,7 +24,18 @@ export async function revokeInstallation(
     eq(installations.accountId, input.accountId),
     isNull(installations.revokedAt),
   );
-  const [, revoked] = await db.batch([
+  const [, , revoked] = await db.batch([
+    db
+      .delete(sessions)
+      .where(
+        and(
+          eq(sessions.installationId, input.installationId),
+          inArray(
+            sessions.installationId,
+            db.select({ id: installations.id }).from(installations).where(owned),
+          ),
+        ),
+      ),
     db
       .delete(devices)
       .where(
@@ -57,6 +69,7 @@ export async function deleteAccount(
     db.delete(deliveryDedup).where(eq(deliveryDedup.accountId, input.accountId)),
     db.delete(devices).where(inArray(devices.installationId, installationsOf(db, input.accountId))),
     db.delete(relayCredentials).where(eq(relayCredentials.accountId, input.accountId)),
+    db.delete(sessions).where(eq(sessions.accountId, input.accountId)),
     db.delete(installations).where(eq(installations.accountId, input.accountId)),
     db
       .update(notificationAccounts)
@@ -69,5 +82,5 @@ export async function deleteAccount(
       )
       .returning({ id: notificationAccounts.id }),
   ]);
-  return results[4].length > 0;
+  return results[5].length > 0;
 }
