@@ -50,6 +50,7 @@ CREATE TABLE `installations` (
 	`attestation_state` text DEFAULT 'pending' NOT NULL,
 	`created_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
 	`revoked_at` integer,
+	`last_used_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
 	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "installations_attestation_state" CHECK("installations"."attestation_state" IN ('pending', 'verified', 'not_supported'))
 );

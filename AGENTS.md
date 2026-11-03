@@ -102,7 +102,7 @@ pnpm build       # wrangler deploy --dry-run。デプロイはしない
 - Node.js の版は `mise.toml` と `.github/workflows/ci.yml` の 2 か所にある。そろえて上げる (ADR-0003)。
 - 公開の API は `@hono/zod-openapi` のスキーマで先に決め、生成したものを手で直さない。エラーの応答は `src/problem.ts` の problem+json にし、`request_id` はサーバーで作る。エラーの文は応答にもログにも出さない。
 - APNs のデバイストークンは、`src/security/device-token.ts` の `sealDeviceToken` で、端末の行に結び付けて暗号化し、版の付いた指紋 (HMAC) と一緒に DB に置く (ADR-0005)。DB の関数はブランドの型で受け、DB も形を CHECK で確かめる。鍵は確かめの値 (`DEVICE_TOKEN_KEY_CHECKS`、`scripts/key-check.mjs` で作る) と比べてから使う。暗号化の鍵の入れ替えは 2 段で行い (足してから current にする)、古い鍵は古い暗号文がなくなるまで残す。指紋の鍵は入れ替えない。トークン、鍵、暗号文、指紋は、ログにもエラーの文にも出さない。
-- 登録とセッションの約束事 (チャレンジ、端末の鍵の署名、トークン) は ADR-0006、中継の資格情報の入れ替えと取り消しは ADR-0007、端末の登録とトークンを持っていることの確かめは ADR-0008、中継の受け付けと端末へ送る流れは ADR-0009。試作のあいだは、招待のコード (`ENROLLMENT_INVITE_CODE`) がないと登録できない。App Attest を確かめるまで (AUTH-003) この制限を外さない。
+- 登録とセッションの約束事 (チャレンジ、端末の鍵の署名、トークン) は ADR-0006、中継の資格情報の入れ替えと取り消しは ADR-0007、端末の登録とトークンを持っていることの確かめは ADR-0008、中継の受け付けと端末へ送る流れは ADR-0009、使われなくなったアカウントを消すのは ADR-0010。試作のあいだは、招待のコード (`ENROLLMENT_INVITE_CODE`) がないと登録できない。App Attest を確かめるまで (AUTH-003) この制限を外さない。
 - 型の付いた入口 (zod-openapi) からは、宣言した成功の応答だけを返し、失敗は `ProblemError` を投げる (app.ts の onError が problem+json にする)。アカウントのセッションが要る入口には、`createRoute` の `middleware` に `requireSession` を置く (`c.get("session")` は、置いた入口でだけ型に出る。`app.use` で付けると型に出ない)。中継の資格情報で送る入口には `requireRelayCredential` を置く (ADR-0007)。
 - 名前を名乗らない入口や、D1 に書く入口には、回数の制限 (`enforceRateLimit`、Workers の Rate Limiting) を付ける。制限の数は `wrangler.jsonc` の `ratelimits` に置く。
 - 公開鍵、署名、MAC などのバイト列は、`fromBase64Url` で読む (書き方を 1 つに決め、`=` や使わないビットの違う書き方を受けない)。
@@ -111,6 +111,6 @@ pnpm build       # wrangler deploy --dry-run。デプロイはしない
 - `GET /health` などの公開の応答に、版、設定、秘密の有無を出さない。
 - D1 のスキーマは `packages/db/src/schema.ts` に書き、migration は `pnpm --filter @notification-service/db generate` (drizzle-kit) で作る。作った SQL を手で直さない。例外は、親の表を作り直す migration だけ。drizzle-kit が出す `PRAGMA foreign_keys` は D1 で効かないので、先頭に `PRAGMA defer_foreign_keys = on`、末尾に `PRAGMA defer_foreign_keys = off` を置き、途中の `PRAGMA foreign_keys` の行はすべて消す (off は末尾だけ。途中に置くと、そのあとの作り直しで失敗する。ADR-0004)。末尾の off は本当の違反も数えなくするので、`migrations.test.ts` が `PRAGMA foreign_key_check` で、親のない子の行がないことを確かめる。外部キーは CASCADE にしない (表を作り直すと、子の行が消える)。データの入った D1 に migration を当てても行が残ることは、`migrations.test.ts` で確かめる。CI が、schema.ts と migration のずれを調べる。本番の D1 に migration を当てるのは、オーナーの承認を得てから。
 - DB の時刻は、UNIX 時間のミリ秒の整数で持つ (ADR-0004)。生の SQL で `CURRENT_TIMESTAMP` などの文字列の時刻と比べない。
-- DB の読み書きは、アカウントをまたがないよう、条件にアカウントを入れる。テストで、ほかのアカウントに触れないことを確かめる。例外は、アカウントを決めるための読み (`findActiveRelayCredential`。資格情報のハッシュでアカウントが決まる)、サーバーが選んだ端末への APNs の応答 (`invalidateDevice`。トークンの指紋も合わせる)、確かめで、同じトークンを確かめていたほかの行の確かめを外すこと (`markDeviceVerified`。確かめた側が自分のアカウントの有効なインストールのときだけ)、定期の掃除 (`deleteAcceptedEventsBefore`、`deleteStaleDevices` など) だけ。
+- DB の読み書きは、アカウントをまたがないよう、条件にアカウントを入れる。テストで、ほかのアカウントに触れないことを確かめる。例外は、アカウントを決めるための読み (`findActiveRelayCredential`。資格情報のハッシュでアカウントが決まる)、サーバーが選んだ端末への APNs の応答 (`invalidateDevice`。トークンの指紋も合わせる)、確かめで、同じトークンを確かめていたほかの行の確かめを外すこと (`markDeviceVerified`。確かめた側が自分のアカウントの有効なインストールのときだけ)、定期の掃除 (`deleteAcceptedEventsBefore`、`deleteStaleDevices`、`findAbandonedAccounts` など) だけ。
 - テストの D1 は、同じファイルのテストどうしで空にならない。ID、ハッシュ、トークンはテストごとに違う値 (`unique()`) にし、ほかのテストの行に頼らない。
 - テストは `apps/api/test/` に置く (設計書 §7 の `tests/{unit,…}` は、workspace に合わせてパッケージの中に置いた)。

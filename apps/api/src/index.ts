@@ -1,5 +1,6 @@
 import { createApp } from "./app";
 import {
+  cleanupAbandonedAccounts,
   cleanupAcceptedEvents,
   cleanupExpiredAuthRecords,
   cleanupStaleDevices,
@@ -16,14 +17,16 @@ export default {
         cleanupAcceptedEvents(env, controller.scheduledTime),
         cleanupExpiredAuthRecords(env, controller.scheduledTime),
         cleanupStaleDevices(env, controller.scheduledTime),
+        cleanupAbandonedAccounts(env, controller.scheduledTime),
       ]).then(
-        ([acceptedEvents, authRecords, staleDevices]) =>
+        ([acceptedEvents, authRecords, staleDevices, abandonedAccounts]) =>
           console.log(
             JSON.stringify({
               event: "cleanup",
               accepted_events: acceptedEvents,
               auth_records: authRecords,
               stale_devices: staleDevices,
+              abandoned_accounts: abandonedAccounts,
             }),
           ),
         (error: unknown) => {

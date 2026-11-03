@@ -1,10 +1,13 @@
 import {
+  ABANDONED_ACCOUNT_AFTER_MS,
   createDb,
+  deleteAbandonedAccount,
   deleteAcceptedEventsBefore,
   deleteExpiredAuthRecords,
   deleteExpiredDeviceVerifications,
   deleteRevokedRelayCredentials,
   deleteStaleDevices,
+  findAbandonedAccounts,
 } from "@notification-service/db";
 import { CLOCK_SKEW_MS } from "./security/challenge";
 
@@ -104,6 +107,36 @@ export async function cleanupStaleDevices(
     afterRowid = result.lastRowid;
     // 選んだ数で決める (選んだ後に登録し直されて消さなかった行があっても、続きを探す)。
     if (result.selected < limits.batch) return { deleted, capped: false };
+  }
+  return { deleted, capped: true };
+}
+
+/** 1 回の掃除で消す、使われなくなったアカウントの数の上限 (1 つで 8 つの文のバッチになるので、少なめにする)。 */
+const MAX_ABANDONED_ACCOUNTS_PER_CLEANUP = 200;
+
+/**
+ * 定期の掃除 (Cron)。使われなくなったアカウント (180 日、アプリも中継の資格情報も使われていない) を消す (notification-service#20、
+ * ADR-0010)。消すのは `deleteAccount` と同じもの。消す直前にもう一度確かめる。
+ */
+export async function cleanupAbandonedAccounts(
+  env: Env,
+  scheduledTime: number,
+  limit = MAX_ABANDONED_ACCOUNTS_PER_CLEANUP,
+): Promise<CleanupResult> {
+  const db = createDb(env.DB);
+  const since = new Date(scheduledTime - ABANDONED_ACCOUNT_AFTER_MS);
+  const now = new Date(scheduledTime);
+  let deleted = 0;
+  let afterRowid = 0;
+  let remaining = limit;
+  while (remaining > 0) {
+    const found = await findAbandonedAccounts(db, { since, afterRowid }, Math.min(remaining, 50));
+    for (const accountId of found.accountIds) {
+      if (await deleteAbandonedAccount(db, { accountId, since }, now)) deleted++;
+    }
+    remaining -= found.accountIds.length;
+    afterRowid = found.lastRowid;
+    if (found.accountIds.length < 50) return { deleted, capped: false };
   }
   return { deleted, capped: true };
 }

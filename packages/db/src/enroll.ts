@@ -63,9 +63,13 @@ export async function enrollInstallation(
         .insert(usedChallenges)
         .values({ nonce: input.challenge.nonce, expiresAt: input.challenge.expiresAt }),
       db.insert(notificationAccounts).values({ id: accountId, createdAt: now }),
-      db
-        .insert(installations)
-        .values({ id: installationId, accountId, publicKey: input.publicKey, createdAt: now }),
+      db.insert(installations).values({
+        id: installationId,
+        accountId,
+        publicKey: input.publicKey,
+        createdAt: now,
+        lastUsedAt: now,
+      }),
       db.insert(relayCredentials).values({
         id: relayCredentialId,
         accountId,

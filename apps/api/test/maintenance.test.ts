@@ -5,6 +5,7 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
+  ABANDONED_ACCOUNT_AFTER_MS,
   beginEvent,
   completeEvent,
   createDb,
@@ -18,6 +19,7 @@ import { expect, it } from "vitest";
 import worker from "../src/index";
 import {
   ACCEPTED_EVENT_RETENTION_MS,
+  cleanupAbandonedAccounts,
   cleanupAcceptedEvents,
   cleanupExpiredAuthRecords,
   cleanupStaleDevices,
@@ -252,4 +254,26 @@ it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さ
   );
 
   await expect(waitOnExecutionContext(ctx)).rejects.toThrow(/^cleanup_failed$/);
+});
+
+it("定期の掃除で、使われなくなったアカウントを消し、最近使ったアカウントは残す", async () => {
+  const scheduledTime = Date.now();
+  const abandoned = await newAccount();
+  const active = await newAccount();
+  await env.DB.prepare("UPDATE installations SET last_used_at = ? WHERE id = ?")
+    .bind(scheduledTime - ABANDONED_ACCOUNT_AFTER_MS - 1, abandoned.installationId)
+    .run();
+
+  const result = await cleanupAbandonedAccounts(env, scheduledTime);
+
+  expect(result.deleted).toBeGreaterThanOrEqual(1);
+  const states = await env.DB.prepare(
+    "SELECT id, state FROM notification_accounts WHERE id IN (?, ?) ORDER BY id",
+  )
+    .bind(abandoned.accountId, active.accountId)
+    .all<{ id: string; state: string }>();
+  expect(Object.fromEntries(states.results.map((row) => [row.id, row.state]))).toEqual({
+    [abandoned.accountId]: "deleted",
+    [active.accountId]: "active",
+  });
 });

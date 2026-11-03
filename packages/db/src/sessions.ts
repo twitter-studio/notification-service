@@ -76,6 +76,12 @@ export async function createSession(
         now.getTime(),
         input.session.expiresAt.getTime(),
       ),
+    // 最後に使った時刻を書く (1 日に 1 回まで。セッションは 1 時間ごとに作り直すので、毎回は書かない)。
+    db.$client
+      .prepare(`
+        UPDATE installations SET last_used_at = ?3
+        WHERE id = ?1 AND account_id = ?2 AND last_used_at < ?3 - 86400000`)
+      .bind(input.installationId, input.accountId, now.getTime()),
   ]);
   return created?.results[0]?.id;
 }
