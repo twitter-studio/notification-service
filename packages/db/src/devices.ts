@@ -342,3 +342,40 @@ export async function listActiveDevices(db: Db, accountId: string): Promise<Acti
     tokenFingerprint: row.tokenFingerprint as DeviceTokenFingerprint,
   }));
 }
+
+/**
+ * 使わなくなった端末の行 (暗号化したトークンと指紋) を、`limit` 件まで消し、消した数を返す (定期の掃除で使う)。
+ * - APNs が無効と返した端末 (`invalidated`) で、`invalidatedBefore` より前から書き換えていないもの。
+ * - トークンを持っていることを確かめていない有効な端末で、`unverifiedBefore` より前から書き換えていないもの (確かめの push が
+ *   届かなかった、ほかのインストールに引き継がれた、トークンを知っているだけの人の登録など)。アプリは起動のたびに登録し直すので、
+ *   使っている端末なら書き換わる。
+ * 利用者が止めた端末 (`disabled_by_user`) は消さない。消すと、次の起動の登録で、止めた設定が戻ってしまう (ADR-0004)。
+ * 確かめの記録も一緒に消す (外部キーは CASCADE にしていない)。
+ */
+export async function deleteStaleDevices(
+  db: Db,
+  input: { invalidatedBefore: Date; unverifiedBefore: Date },
+  limit = 500,
+): Promise<number> {
+  const stale = `
+    (state = 'invalidated' AND updated_at < ?1)
+    OR (state = 'active' AND verified_at IS NULL AND updated_at < ?2)`;
+  const { results } = await db.$client
+    .prepare(`SELECT id FROM devices WHERE ${stale} LIMIT ?3`)
+    .bind(input.invalidatedBefore.getTime(), input.unverifiedBefore.getTime(), limit)
+    .all<{ id: string }>();
+  if (results.length === 0) return 0;
+  const ids = JSON.stringify(results.map((row: { id: string }) => row.id));
+  // 選んでから消すまでに登録し直された行 (書き換わった) は、消さない (消す文でも同じ条件を見る)。
+  const [, deleted] = await db.$client.batch([
+    db.$client
+      .prepare(`
+        DELETE FROM device_verifications WHERE device_id IN (
+          SELECT id FROM devices WHERE id IN (SELECT value FROM json_each(?3)) AND (${stale}))`)
+      .bind(input.invalidatedBefore.getTime(), input.unverifiedBefore.getTime(), ids),
+    db.$client
+      .prepare(`DELETE FROM devices WHERE id IN (SELECT value FROM json_each(?3)) AND (${stale})`)
+      .bind(input.invalidatedBefore.getTime(), input.unverifiedBefore.getTime(), ids),
+  ]);
+  return deleted?.meta.changes ?? 0;
+}

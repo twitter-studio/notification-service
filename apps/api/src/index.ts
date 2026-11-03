@@ -1,5 +1,9 @@
 import { createApp } from "./app";
-import { cleanupAcceptedEvents, cleanupExpiredAuthRecords } from "./maintenance";
+import {
+  cleanupAcceptedEvents,
+  cleanupExpiredAuthRecords,
+  cleanupStaleDevices,
+} from "./maintenance";
 
 const app = createApp();
 
@@ -11,13 +15,15 @@ export default {
       Promise.all([
         cleanupAcceptedEvents(env, controller.scheduledTime),
         cleanupExpiredAuthRecords(env, controller.scheduledTime),
+        cleanupStaleDevices(env, controller.scheduledTime),
       ]).then(
-        ([acceptedEvents, authRecords]) =>
+        ([acceptedEvents, authRecords, staleDevices]) =>
           console.log(
             JSON.stringify({
               event: "cleanup",
               accepted_events: acceptedEvents,
               auth_records: authRecords,
+              stale_devices: staleDevices,
             }),
           ),
         (error: unknown) => {
