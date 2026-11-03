@@ -76,6 +76,7 @@ CREATE TABLE `sessions` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `sessions_token_hash_unique` ON `sessions` (`token_hash`);--> statement-breakpoint
 CREATE INDEX `idx_sessions_account` ON `sessions` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_sessions_installation` ON `sessions` (`installation_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_sessions_expires` ON `sessions` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `used_challenges` (
 	`nonce` text PRIMARY KEY NOT NULL,

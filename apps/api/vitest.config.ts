@@ -21,7 +21,7 @@ export default defineConfig(async () => {
             }),
             DEVICE_TOKEN_FINGERPRINT_KEY: "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
             CHALLENGE_SIGNING_KEY: "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8=",
-            ENROLLMENT_INVITE_CODE: "test-invite-code",
+            ENROLLMENT_INVITE_CODE: "test-invite-code-0123456789",
             DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
               fingerprint: "ded9776b92b0a8e2",
               keys: { "test-1": "8242446efc984a7c" },

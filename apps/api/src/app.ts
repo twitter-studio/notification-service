@@ -2,14 +2,33 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import type { ActiveSession } from "@notification-service/db";
 import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
+import { HTTPException } from "hono/http-exception";
 import { ProblemError, problem } from "./problem";
 import { registerEnrollment } from "./routes/enrollment";
 import { registerHealth } from "./routes/health";
 
-export type AppEnv = { Bindings: Env; Variables: { requestId: string; session: ActiveSession } };
+export type AppEnv = { Bindings: Env; Variables: { requestId: string } };
+
+/** `requireSession` を付けた入口だけで使える `c.get("session")`。 */
+export type SessionEnv = {
+  Bindings: Env;
+  Variables: { requestId: string; session: ActiveSession };
+};
 
 /** 本文の大きさの上限 (設計書 §4)。 */
 export const MAX_BODY_BYTES = 4 * 1024;
+
+/** Hono が投げる HTTPException (壊れた JSON の 400、違う Content-Type の 415 など) の題。 */
+const CLIENT_ERROR_TITLES: Partial<Record<number, string>> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  405: "Method Not Allowed",
+  413: "Content Too Large",
+  415: "Unsupported Media Type",
+  429: "Too Many Requests",
+};
 
 const requestId = createMiddleware<AppEnv>(async (c, next) => {
   // 送り手の X-Request-Id は使わない。送り手がログの request_id を決められると、ほかの要求のログに紛れ込ませられるため。
@@ -32,12 +51,21 @@ export function createApp() {
     "/v1/*",
     bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => problem(c, 413, "Content Too Large") }),
   );
+  // 応答には、セッション、中継の資格情報、チャレンジが入る。途中の cache やブラウザに残させない。
+  app.use("/v1/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
   registerHealth(app);
   registerEnrollment(app);
 
   app.notFound((c) => problem(c, 404, "Not Found"));
   app.onError((error, c) => {
-    if (error instanceof ProblemError) return problem(c, error.status, error.title, error.detail);
+    if (error instanceof ProblemError)
+      return problem(c, error.status, error.title, error.detail, error.headers);
+    // Hono の入力の誤り (壊れた JSON、違う Content-Type)。文 (message) は返さず、状態の題だけにする。
+    if (error instanceof HTTPException && error.status < 500)
+      return problem(c, error.status, CLIENT_ERROR_TITLES[error.status] ?? "Bad Request");
     // エラーの文 (message) はログにも応答にも出さない。外部の API のエラーの文に、トークンや秘密が入ることがあるため。
     console.error(
       JSON.stringify({

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { deviceTokenKeyCheckValues, keyCheckValue } from "./device-token";
 import { decodeKey32, fromBase64Url, toBase64Url } from "./encoding";
 
 // 登録とセッションの作り直しで、端末の鍵に署名させるチャレンジ (ADR-0006)。
@@ -7,8 +8,11 @@ import { decodeKey32, fromBase64Url, toBase64Url } from "./encoding";
 
 const VERSION = "c1";
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
-/** サーバーどうしの時計のずれとして許す幅。これを越えて先の期限のチャレンジは、作った覚えがないものとして拒む。 */
-const CLOCK_SKEW_MS = 60 * 1000;
+/**
+ * サーバーどうしの時計のずれとして許す幅。これを越えて先の期限のチャレンジは、作った覚えがないものとして拒む。
+ * 使ったチャレンジの記録は、期限からこの幅を待ってから消す (遅れた時計のサーバーが、まだ期限内として受けるため)。
+ */
+export const CLOCK_SKEW_MS = 60 * 1000;
 
 export type ChallengePurpose = "enroll" | "session";
 
@@ -29,11 +33,20 @@ const PayloadSchema = z.object({
   e: z.number().int(),
 });
 
-/** チャレンジの署名の鍵 (秘密 `CHALLENGE_SIGNING_KEY`、32 バイトの Base64) を読む。 */
-export async function loadChallengeKey(encoded: string | undefined): Promise<CryptoKey> {
+/**
+ * チャレンジの署名の鍵 (秘密 `CHALLENGE_SIGNING_KEY`、32 バイトの Base64) を読む。
+ * デバイストークンの鍵 (`DEVICE_TOKEN_KEY_CHECKS` に確かめの値のあるもの) と同じ鍵なら投げる。用途ごとに鍵を分け、
+ * 1 つが漏れても、ほかの用途に使わせないため。
+ */
+export async function loadChallengeKey(
+  encoded: string | undefined,
+  deviceTokenKeyChecks: string,
+): Promise<CryptoKey> {
   const bytes = decodeKey32(encoded);
   if (bytes === undefined)
     throw new ChallengeKeyError("CHALLENGE_SIGNING_KEY must be 32 bytes of Base64");
+  if (deviceTokenKeyCheckValues(deviceTokenKeyChecks).has(await keyCheckValue(bytes)))
+    throw new ChallengeKeyError("CHALLENGE_SIGNING_KEY must differ from the device token keys");
   return crypto.subtle.importKey("raw", bytes, { name: "HMAC", hash: "SHA-256" }, false, [
     "sign",
     "verify",

@@ -5,6 +5,7 @@ import {
   deleteExpiredAuthRecords,
   findActiveSession,
   isUniqueViolation,
+  MAX_SESSIONS_PER_INSTALLATION,
   revokeInstallation,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
@@ -66,6 +67,41 @@ describe("セッション", () => {
         now,
       ),
     ).rejects.toSatisfy((error) => isUniqueViolation(error, "used_challenges.nonce"));
+  });
+
+  it("1 つのインストールのセッションは、新しいものから上限の数だけ残し、古いものは消す", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const bob = await newAccount(db);
+    const bobHash = unique("h");
+    await createSession(
+      db,
+      { ...bob, challenge: newChallenge(), session: { tokenHash: bobHash, expiresAt: later } },
+      now,
+    );
+    const hashes = Array.from({ length: MAX_SESSIONS_PER_INSTALLATION + 1 }, () => unique("h"));
+    for (const [index, tokenHash] of hashes.entries()) {
+      await createSession(
+        db,
+        { ...alice, challenge: newChallenge(), session: { tokenHash, expiresAt: later } },
+        new Date(now.getTime() + index),
+      );
+    }
+
+    const active = new Date(now.getTime() + hashes.length);
+    const [oldest, ...newest] = hashes;
+    expect(await findActiveSession(db, oldest ?? "", active)).toBeUndefined();
+    for (const tokenHash of newest) {
+      expect(await findActiveSession(db, tokenHash, active)).toBeDefined();
+    }
+    const rows = await env.DB.prepare(
+      "SELECT count(*) AS count FROM sessions WHERE installation_id = ?",
+    )
+      .bind(alice.installationId)
+      .first<{ count: number }>();
+    expect(rows?.count).toBe(MAX_SESSIONS_PER_INSTALLATION);
+    // ほかのインストールのセッションは消さない。
+    expect(await findActiveSession(db, bobHash, active)).toBeDefined();
   });
 
   it("期限切れ、取り消したインストール、消したアカウントのセッションは使えず、取り消しと削除でセッションの行も消える", async () => {

@@ -15,6 +15,7 @@ export function problem(
   status: ContentfulStatusCode,
   title: string,
   detail?: string,
+  headers: Record<string, string> = {},
 ): Response {
   const body: Problem = {
     type: "about:blank",
@@ -23,7 +24,10 @@ export function problem(
     ...(detail === undefined ? {} : { detail }),
     request_id: c.get("requestId"),
   };
-  return c.body(JSON.stringify(body), status, { "Content-Type": "application/problem+json" });
+  return c.body(JSON.stringify(body), status, {
+    ...headers,
+    "Content-Type": "application/problem+json",
+  });
 }
 
 /**
@@ -36,6 +40,7 @@ export class ProblemError extends Error {
     readonly status: ContentfulStatusCode,
     readonly title: string,
     readonly detail?: string,
+    readonly headers: Record<string, string> = {},
   ) {
     super(title);
   }

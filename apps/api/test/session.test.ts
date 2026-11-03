@@ -1,10 +1,10 @@
 import { env } from "cloudflare:workers";
-import { createDb } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { requireSession } from "../src/middleware/session";
 import { enrollmentMessage } from "../src/security/installation-key";
 import { newDeviceKey } from "./helpers/device-key";
+import { jsonHeaders } from "./helpers/http";
 
 function appWithProtectedRoute() {
   const app = createApp();
@@ -21,7 +21,7 @@ async function enrolledSession() {
         "https://notification.test/v1/enrollments/challenge",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: jsonHeaders(),
           body: JSON.stringify({ purpose: "enroll" }),
         },
         env,
@@ -32,12 +32,12 @@ async function enrolledSession() {
     "https://notification.test/v1/enrollments",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({
         challenge,
         public_key: device.publicKey,
         signature: await device.sign(enrollmentMessage(challenge, device.publicKey)),
-        invite_code: "test-invite-code",
+        invite_code: "test-invite-code-0123456789",
       }),
     },
     env,
@@ -93,6 +93,5 @@ describe("セッションの確かめ", () => {
       expect(response.status, String(authorization)).toBe(401);
       expect(response.headers.get("WWW-Authenticate")).toContain("Bearer");
     }
-    expect(createDb).toBeDefined();
   });
 });

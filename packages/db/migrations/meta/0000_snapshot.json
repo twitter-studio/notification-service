@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0d8b5af9-09dd-4f3d-8d38-eaa98ad5e338",
+  "id": "c1e4df54-6d77-4257-aa1c-a62b3070d8f3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -451,6 +451,11 @@
         "idx_sessions_account": {
           "name": "idx_sessions_account",
           "columns": ["account_id"],
+          "isUnique": false
+        },
+        "idx_sessions_installation": {
+          "name": "idx_sessions_installation",
+          "columns": ["installation_id", "created_at"],
           "isUnique": false
         },
         "idx_sessions_expires": {

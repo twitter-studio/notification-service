@@ -6,9 +6,10 @@ DEVICE_TOKEN_KEYS=
 # デバイストークンの指紋 (HMAC-SHA256) の鍵 (32 バイトの Base64)。
 DEVICE_TOKEN_FINGERPRINT_KEY=
 
-# 登録とセッションの作り直しのチャレンジに署名する鍵 (32 バイトの Base64。ADR-0006)。
+# 登録とセッションの作り直しのチャレンジに署名する鍵 (32 バイトの Base64。ADR-0006)。デバイストークンの鍵とは別の値にし、環境ごとに作る。
 CHALLENGE_SIGNING_KEY=
-# 登録の招待のコード (試作のあいだ、登録をテスト用の人に限る。空なら登録を受け付けない。ADR-0006)。
+# 登録の招待のコード (試作のあいだ、登録をテスト用の人に限る。ADR-0006)。16 バイト以上の乱数の Base64URL (22 文字以上)。
+# 空のとき、短いときは、登録を受け付けない。作り方: node -e 'console.log(crypto.randomBytes(16).toString("base64url"))'
 ENROLLMENT_INVITE_CODE=
 
 # 鍵の確かめの値 (秘密ではない) は wrangler.jsonc の vars にある。手元の鍵で動かすときは、手元の鍵の値を .dev.vars で上書きする。

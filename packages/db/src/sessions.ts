@@ -23,9 +23,14 @@ export async function findActiveInstallation(
   return rows[0];
 }
 
+/** 1 つのインストールが同時に持てるセッションの数。作るときに、これを超える古いものを消す (DB の行を増やし続けさせない)。 */
+export const MAX_SESSIONS_PER_INSTALLATION = 5;
+
 /**
  * セッションを作る。チャレンジを使ったものとして記録し (同じチャレンジの 2 回目は UNIQUE で失敗する)、
  * インストールがそのアカウントの有効なものなら、セッションを置く (1 つのバッチ)。作れたらセッションの ID。
+ * 新しく置くものを含めて `MAX_SESSIONS_PER_INSTALLATION` 個になるよう、そのインストールの古いセッション
+ * (期限切れ、取り消し済みを含む) を消す。
  */
 export async function createSession(
   db: Db,
@@ -38,10 +43,23 @@ export async function createSession(
   now = new Date(),
 ): Promise<string | undefined> {
   const id = crypto.randomUUID();
-  const [, created] = await db.$client.batch<{ id: string }>([
+  const [, , created] = await db.$client.batch<{ id: string }>([
     db.$client
       .prepare("INSERT INTO used_challenges (nonce, expires_at) VALUES (?1, ?2)")
       .bind(input.challenge.nonce, input.challenge.expiresAt.getTime()),
+    db.$client
+      .prepare(`
+        DELETE FROM sessions
+        WHERE installation_id = ?1 AND account_id = ?2 AND id NOT IN (
+          SELECT id FROM sessions
+          WHERE installation_id = ?1 AND revoked_at IS NULL AND expires_at > ?3
+          ORDER BY created_at DESC, id DESC LIMIT ?4)`)
+      .bind(
+        input.installationId,
+        input.accountId,
+        now.getTime(),
+        MAX_SESSIONS_PER_INSTALLATION - 1,
+      ),
     db.$client
       .prepare(`
         INSERT INTO sessions (id, account_id, installation_id, token_hash, created_at, expires_at)

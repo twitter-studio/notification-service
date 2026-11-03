@@ -163,6 +163,8 @@ export const sessions = sqliteTable(
   },
   (t) => [
     index("idx_sessions_account").on(t.accountId),
+    // インストールの取り消しと、インストールごとのセッションの数の上限 (新しい順に残す) で引く。
+    index("idx_sessions_installation").on(t.installationId, t.createdAt),
     index("idx_sessions_expires").on(t.expiresAt),
   ],
 );

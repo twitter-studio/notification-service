@@ -10,13 +10,13 @@ import {
   usedChallenges,
 } from "./schema";
 
-export type Enrollment = {
-  accountId: string;
-  installationId: string;
-  /** 新しく作ったときだけ。やり直しで既存のものを返したときは、資格情報を作り直すかを呼ぶ側が決める (AUTH-002)。 */
-  relayCredentialId?: string;
-  created: boolean;
-};
+/**
+ * 中継の資格情報の ID は、新しく作ったときだけ返す。やり直しで既存のものを返したときは、資格情報を作り直すかを
+ * 呼ぶ側が決める (AUTH-002)。
+ */
+export type Enrollment =
+  | { created: true; accountId: string; installationId: string; relayCredentialId: string }
+  | { created: false; accountId: string; installationId: string };
 
 /**
  * 通知のアカウント、最初のインストール、中継の資格情報を、1 つのバッチで作る (設計書 §3 の手順 3)。
@@ -32,7 +32,7 @@ export async function enrollInstallation(
     publicKey: string;
     relaySecretHash: string;
     /** 署名に使ったチャレンジ。バッチの先頭で使ったものとして記録し、同じチャレンジの 2 回目は UNIQUE で失敗する。 */
-    challenge?: ConsumedChallenge;
+    challenge: ConsumedChallenge;
     /** 一緒に作るセッション。 */
     session?: NewSession;
   },
@@ -43,14 +43,6 @@ export async function enrollInstallation(
   const relayCredentialId = crypto.randomUUID();
   try {
     // D1 のバッチは、まとめて成功するか、まとめて取り消される。片方だけが残らない。
-    const consume =
-      input.challenge === undefined
-        ? []
-        : [
-            db
-              .insert(usedChallenges)
-              .values({ nonce: input.challenge.nonce, expiresAt: input.challenge.expiresAt }),
-          ];
     const session =
       input.session === undefined
         ? []
@@ -66,7 +58,9 @@ export async function enrollInstallation(
           ];
     // 使ったチャレンジの記録を先頭に置く。同じチャレンジの 2 回目は、何も作る前に UNIQUE で失敗する。
     const statements: BatchItem<"sqlite">[] = [
-      ...consume,
+      db
+        .insert(usedChallenges)
+        .values({ nonce: input.challenge.nonce, expiresAt: input.challenge.expiresAt }),
       db.insert(notificationAccounts).values({ id: accountId, createdAt: now }),
       db
         .insert(installations)
@@ -80,7 +74,7 @@ export async function enrollInstallation(
       ...session,
     ];
     await db.batch(statements as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
-    return { accountId, installationId, relayCredentialId, created: true };
+    return { accountId, installationId, relayCredentialId, created: true as const };
   } catch (error) {
     if (!isUniqueViolation(error, "installations.public_key")) throw error;
     // 止めたアカウントや消したアカウントのものは返さない (呼ぶ側には、元のエラーのまま返す)。
@@ -98,6 +92,6 @@ export async function enrollInstallation(
       .limit(1);
     const row = existing[0];
     if (row === undefined) throw error;
-    return { ...row, created: false };
+    return { ...row, created: false as const };
   }
 }

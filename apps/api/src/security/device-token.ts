@@ -70,6 +70,12 @@ export async function keyCheckValue(key: Uint8Array<ArrayBuffer>): Promise<strin
   return Array.from(digest.slice(0, 8), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/** 鍵の確かめの値 (`DEVICE_TOKEN_KEY_CHECKS`) に書いた値をすべて返す。ほかの用途の鍵が、これらの鍵と同じでないかを確かめるのに使う。 */
+export function deviceTokenKeyCheckValues(json: string): ReadonlySet<string> {
+  const checks = parseJson(KeyChecksSchema, json, "DEVICE_TOKEN_KEY_CHECKS");
+  return new Set([checks.fingerprint, ...Object.values(checks.keys)]);
+}
+
 /**
  * 秘密 (`DEVICE_TOKEN_KEYS`、`DEVICE_TOKEN_FINGERPRINT_KEY`) と、鍵の確かめの値 (`DEVICE_TOKEN_KEY_CHECKS`) から鍵を読む。
  * 鍵ごとに確かめの値と比べ、合わなければ投げる (打ち間違えた古い鍵で、古い暗号文が読めなくなるのに気づけないため)。

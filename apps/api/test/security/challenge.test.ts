@@ -13,7 +13,7 @@ const now = new Date("2026-11-04T00:00:00.000Z");
 
 describe("チャレンジ", () => {
   it("出したチャレンジは、同じ用途で期限内なら確かめられ、使ったものとして記録する nonce と期限を返す", async () => {
-    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY);
+    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
     const issued = await issueChallenge(key, "enroll", now);
 
     const verified = await verifyChallenge(key, issued.challenge, "enroll", now);
@@ -23,7 +23,7 @@ describe("チャレンジ", () => {
   });
 
   it("毎回違うチャレンジになる", async () => {
-    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY);
+    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
 
     expect((await issueChallenge(key, "enroll", now)).challenge).not.toBe(
       (await issueChallenge(key, "enroll", now)).challenge,
@@ -31,7 +31,7 @@ describe("チャレンジ", () => {
   });
 
   it("用途の違うもの、期限を過ぎたもの、作った覚えのない先の期限のものは拒む", async () => {
-    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY);
+    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
     const issued = await issueChallenge(key, "enroll", now);
     const future = await issueChallenge(key, "enroll", new Date(now.getTime() + 60 * 60 * 1000));
 
@@ -47,8 +47,11 @@ describe("チャレンジ", () => {
   });
 
   it("書き換えたもの、ほかの鍵で署名したもの、形の違うものは拒む", async () => {
-    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY);
-    const otherKey = await loadChallengeKey("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=");
+    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
+    const otherKey = await loadChallengeKey(
+      "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=",
+      env.DEVICE_TOKEN_KEY_CHECKS,
+    );
     const { challenge } = await issueChallenge(key, "enroll", now);
     const [version, payload = "", mac = ""] = challenge.split(".");
     const flip = (text: string) =>
@@ -71,9 +74,20 @@ describe("チャレンジ", () => {
     }
   });
 
-  it("署名の鍵がない、形が違うときは、鍵の設定の誤りとして扱う", async () => {
-    for (const encoded of [undefined, "", "c2hvcnQ=", "not base64!"]) {
-      await expect(loadChallengeKey(encoded), String(encoded)).rejects.toThrow(ChallengeKeyError);
+  it("署名の鍵がない、形が違う、デバイストークンの鍵と同じときは、鍵の設定の誤りとして扱う", async () => {
+    const deviceTokenKeys = JSON.parse(env.DEVICE_TOKEN_KEYS) as { keys: Record<string, string> };
+    for (const encoded of [
+      undefined,
+      "",
+      "c2hvcnQ=",
+      "not base64!",
+      env.DEVICE_TOKEN_FINGERPRINT_KEY,
+      ...Object.values(deviceTokenKeys.keys),
+    ]) {
+      await expect(
+        loadChallengeKey(encoded, env.DEVICE_TOKEN_KEY_CHECKS),
+        String(encoded),
+      ).rejects.toThrow(ChallengeKeyError);
     }
   });
 });

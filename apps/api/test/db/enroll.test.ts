@@ -5,7 +5,7 @@ import {
   isUniqueViolation,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
-import { testDb, unique } from "./helpers";
+import { consumedChallenge, testDb, unique } from "./helpers";
 
 describe("登録 (アカウント、インストール、中継の資格情報)", () => {
   it("アカウントは X の ID と関係のない UUID で、インストールと資格情報と一緒に作る", async () => {
@@ -15,6 +15,7 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
     const enrolled = await enrollInstallation(db, {
       publicKey: unique("key"),
       relaySecretHash: secretHash,
+      challenge: consumedChallenge(),
     });
 
     expect(enrolled.created).toBe(true);
@@ -27,9 +28,17 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
   it("同じ公開鍵で呼び直すと、新しく作らず、前のアカウントとインストールを返す", async () => {
     const db = testDb();
     const publicKey = unique("key");
-    const first = await enrollInstallation(db, { publicKey, relaySecretHash: unique("hash") });
+    const first = await enrollInstallation(db, {
+      publicKey,
+      relaySecretHash: unique("hash"),
+      challenge: consumedChallenge(),
+    });
 
-    const retried = await enrollInstallation(db, { publicKey, relaySecretHash: unique("hash") });
+    const retried = await enrollInstallation(db, {
+      publicKey,
+      relaySecretHash: unique("hash"),
+      challenge: consumedChallenge(),
+    });
 
     expect(retried).toEqual({
       accountId: first.accountId,
@@ -41,12 +50,20 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
   it("途中で失敗したら、アカウントもインストールも残さない", async () => {
     const db = testDb();
     const takenHash = unique("hash");
-    await enrollInstallation(db, { publicKey: unique("key"), relaySecretHash: takenHash });
+    await enrollInstallation(db, {
+      publicKey: unique("key"),
+      relaySecretHash: takenHash,
+      challenge: consumedChallenge(),
+    });
     const publicKey = unique("key");
 
-    await expect(enrollInstallation(db, { publicKey, relaySecretHash: takenHash })).rejects.toThrow(
-      /UNIQUE/,
-    );
+    await expect(
+      enrollInstallation(db, {
+        publicKey,
+        relaySecretHash: takenHash,
+        challenge: consumedChallenge(),
+      }),
+    ).rejects.toThrow(/UNIQUE/);
 
     const installation = await env.DB.prepare(
       "SELECT count(*) AS count FROM installations WHERE public_key = ?",
@@ -60,6 +77,7 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
     const enrolled = await enrollInstallation(testDb(), {
       publicKey: unique("key"),
       relaySecretHash: unique("hash"),
+      challenge: consumedChallenge(),
     });
 
     const second = env.DB.prepare(
@@ -72,13 +90,21 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
   it("止めたアカウントの公開鍵で呼び直しても、そのアカウントは返さない", async () => {
     const db = testDb();
     const publicKey = unique("key");
-    const first = await enrollInstallation(db, { publicKey, relaySecretHash: unique("hash") });
+    const first = await enrollInstallation(db, {
+      publicKey,
+      relaySecretHash: unique("hash"),
+      challenge: consumedChallenge(),
+    });
     await env.DB.prepare("UPDATE notification_accounts SET state = 'disabled' WHERE id = ?")
       .bind(first.accountId)
       .run();
 
     await expect(
-      enrollInstallation(db, { publicKey, relaySecretHash: unique("hash") }),
+      enrollInstallation(db, {
+        publicKey,
+        relaySecretHash: unique("hash"),
+        challenge: consumedChallenge(),
+      }),
     ).rejects.toSatisfy((error) => isUniqueViolation(error, "installations.public_key"));
   });
 });
