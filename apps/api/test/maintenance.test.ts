@@ -4,7 +4,12 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { acceptEventOnce, createDb, enrollInstallation } from "@notification-service/db";
+import {
+  acceptEventOnce,
+  createDb,
+  createSession,
+  enrollInstallation,
+} from "@notification-service/db";
 import { expect, it } from "vitest";
 import worker from "../src/index";
 import {
@@ -117,6 +122,40 @@ it("使ったチャレンジの記録は、期限から時計のずれの幅を�
     .bind(nonces.recent, nonces.old)
     .all<{ nonce: string }>();
   expect(remaining.results.map((row) => row.nonce)).toEqual([nonces.recent]);
+});
+
+it("チャレンジかセッションのどちらかの表が区切りの件数に届いたら、消し残しがありうることを返す", async () => {
+  const db = createDb(env.DB);
+  // ほかのテストの記録を数えないよう、さらに古い時刻で試す。
+  const past = new Date("1980-01-01T00:00:00.000Z");
+  // セッションを作るときに、同じインストールの期限切れのセッションは消えるので、アカウントを分ける。
+  for (const account of [await newAccount(), await newAccount()]) {
+    await createSession(
+      db,
+      {
+        accountId: account.accountId,
+        installationId: account.installationId,
+        challenge: { nonce: `nonce-${crypto.randomUUID()}`, expiresAt: past },
+        session: { tokenHash: `hash-${crypto.randomUUID()}`, expiresAt: past },
+      },
+      past,
+    );
+  }
+  await env.DB.prepare("INSERT INTO used_challenges (nonce, expires_at) VALUES (?, ?)")
+    .bind(`nonce-${crypto.randomUUID()}`, past.getTime())
+    .run();
+  const scheduledTime = Date.parse("1990-01-01T00:00:00.000Z");
+
+  // チャレンジ 3 件、セッション 2 件。1 回目は両方とも 2 件ずつ消して、上限に届く。
+  expect(await cleanupExpiredAuthRecords(env, scheduledTime, { batch: 2, maxBatches: 1 })).toEqual({
+    deleted: 4,
+    capped: true,
+  });
+  // 2 回目は、チャレンジの残りの 1 件だけ。
+  expect(await cleanupExpiredAuthRecords(env, scheduledTime, { batch: 2, maxBatches: 1 })).toEqual({
+    deleted: 1,
+    capped: false,
+  });
 });
 
 it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さない", async () => {

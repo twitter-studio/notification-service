@@ -9,10 +9,11 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { createApp, MAX_BODY_BYTES } from "../src/app";
 import { hashBearerToken } from "../src/security/bearer";
+import { issueChallenge, loadChallengeKey } from "../src/security/challenge";
 import { fromBase64Url, toBase64Url } from "../src/security/encoding";
 import { enrollmentMessage, sessionMessage } from "../src/security/installation-key";
 import { newDeviceKey } from "./helpers/device-key";
-import { jsonHeaders } from "./helpers/http";
+import { clientAddress, jsonHeaders } from "./helpers/http";
 
 const INVITE = "test-invite-code-0123456789";
 
@@ -175,6 +176,24 @@ describe("端末の登録", () => {
     expect((await expectProblem(response, 422)).detail).toBe("The public key is invalid.");
   });
 
+  it("期限を過ぎたチャレンジでは登録できない", async () => {
+    const key = await loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
+    const expired = await issueChallenge(key, "enroll", new Date(Date.now() - 10 * 60 * 1000));
+
+    await expectProblem(await enroll(await newDeviceKey(), { challenge: expired.challenge }), 401);
+  });
+
+  it("同じ鍵での登録し直しも、インストールごとのセッションの作り直しとして数える", async () => {
+    const device = await newDeviceKey();
+    expect((await enroll(device)).status).toBe(201);
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt++) {
+      statuses.push((await enroll(device)).status);
+    }
+
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+  });
+
   it("署名が違うときはチャレンジを使ったことにせず、正しい署名なら同じチャレンジで登録できる", async () => {
     const device = await newDeviceKey();
     const issued = await challenge("enroll");
@@ -259,10 +278,12 @@ describe("端末の登録", () => {
     expect((await reenrolled.json<Enrolled>()).account_id).not.toBe(deletedBody.account_id);
   });
 
-  it("同じ IP からの呼び出しが多すぎると、429 と Retry-After を返す", async () => {
-    const headers = jsonHeaders();
+  it("同じ IP (IPv6 は同じ /64) からの呼び出しが多すぎると、429 と Retry-After を返す", async () => {
+    const network = clientAddress().replace(/::1$/, "");
     const statuses: number[] = [];
     for (let attempt = 0; attempt < 21; attempt++) {
+      // /64 の中でアドレスを変えても、同じ IP として数える。
+      const headers = jsonHeaders(`${network}::${(attempt + 1).toString(16)}`);
       const response = await post("/v1/enrollments/challenge", { purpose: "enroll" }, headers);
       statuses.push(response.status);
       if (response.status === 429) {
@@ -391,6 +412,30 @@ describe("セッションの作り直し", () => {
     }
 
     expect(statuses).toEqual([201, 201, 201, 201, 201, 429]);
+  });
+
+  it("登録用のチャレンジや、登録の文への署名では、セッションを作れない", async () => {
+    const device = await newDeviceKey();
+    const enrolled = await (await enroll(device)).json<Enrolled>();
+    const enrollChallenge = await challenge("enroll");
+    await expectProblem(
+      await post("/v1/sessions", {
+        installation_id: enrolled.installation_id,
+        challenge: enrollChallenge,
+        signature: await device.sign(sessionMessage(enrollChallenge, enrolled.installation_id)),
+      }),
+      401,
+    );
+
+    const issued = await challenge("session");
+    await expectProblem(
+      await post("/v1/sessions", {
+        installation_id: enrolled.installation_id,
+        challenge: issued,
+        signature: await device.sign(enrollmentMessage(issued, device.publicKey)),
+      }),
+      401,
+    );
   });
 
   it("同じチャレンジでセッションを 2 回作れない", async () => {

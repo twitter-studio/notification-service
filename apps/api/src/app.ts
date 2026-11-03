@@ -47,15 +47,15 @@ export function createApp() {
     },
   });
   app.use(requestId);
-  app.use(
-    "/v1/*",
-    bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => problem(c, 413, "Content Too Large") }),
-  );
   // 応答には、セッション、中継の資格情報、チャレンジが入る。途中の cache やブラウザに残させない。
   app.use("/v1/*", async (c, next) => {
     await next();
     c.header("Cache-Control", "no-store");
   });
+  app.use(
+    "/v1/*",
+    bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => problem(c, 413, "Content Too Large") }),
+  );
   registerHealth(app);
   registerEnrollment(app);
 

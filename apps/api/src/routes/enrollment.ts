@@ -194,15 +194,19 @@ const UNKNOWN_INSTALLATION_KEY = parseInstallationPublicKey(
  * (試作のあいだの制限。ADR-0006)。受け付けていないときとコードが違うときは、同じ応答にする (秘密を置いたかを探らせない)。
  */
 async function checkInvite(c: Context<AppEnv>, inviteCode: string): Promise<void> {
-  const expected = c.env.ENROLLMENT_INVITE_CODE;
-  const open = expected !== undefined && INVITE_CODE_SHAPE.test(expected);
-  if (expected !== undefined && expected.length > 0 && !open) {
-    // 値は出さない。
+  const expected = c.env.ENROLLMENT_INVITE_CODE ?? "";
+  const open = INVITE_CODE_SHAPE.test(expected);
+  if (expected.length > 0 && !open && !warnedShortInviteCode) {
+    // 値は出さない。要求のたびに出すとログを埋められるので、isolate ごとに 1 回だけ出す。
+    warnedShortInviteCode = true;
     console.error(JSON.stringify({ event: "enrollment_invite_code_too_short" }));
   }
-  if (!open || !(await constantTimeEquals(inviteCode, expected)))
-    throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
+  // 受け付けていないときも比べ、かかる時間で秘密を置いたかを探らせない。
+  const matches = await constantTimeEquals(inviteCode, expected);
+  if (!open || !matches) throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
 }
+
+let warnedShortInviteCode = false;
 
 function challengeKey(env: Env): Promise<CryptoKey> {
   return loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
@@ -272,6 +276,11 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
         );
       }
       // 同じ鍵で登録し直した (前の応答を受け取れなかったなど)。鍵を持っていることは署名で確かめたので、セッションだけを作る。
+      // セッションの作り直しと同じく、インストールごとに数える (この入口で、制限を越えて作り直させない)。
+      await enforceRateLimit(
+        c.env.INSTALLATION_RATE_LIMITER,
+        `installation:${enrolled.installationId}`,
+      );
       const sessionId = await createSession(
         db,
         {

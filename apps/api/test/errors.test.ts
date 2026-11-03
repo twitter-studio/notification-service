@@ -1,6 +1,6 @@
 import { exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { createApp } from "../src/app";
+import { createApp, MAX_BODY_BYTES } from "../src/app";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -34,10 +34,20 @@ describe("エラーの応答", () => {
     }
   });
 
-  it("/v1 の応答は、途中の cache に残させない", async () => {
-    const response = await exports.default.fetch("https://notification.test/v1/unknown");
+  it("/v1 の応答は、本文が大きすぎるときも含め、途中の cache に残させない", async () => {
+    const notFound = await exports.default.fetch("https://notification.test/v1/unknown");
+    const tooLarge = await exports.default.fetch(
+      "https://notification.test/v1/enrollments/challenge",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ padding: "x".repeat(MAX_BODY_BYTES) }),
+      },
+    );
 
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(notFound.headers.get("Cache-Control")).toBe("no-store");
+    expect(tooLarge.status).toBe(413);
+    expect(tooLarge.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("思わぬエラーは 500 の problem+json にし、エラーの文を応答にもログにも出さない", async () => {
