@@ -199,12 +199,15 @@ describe("中継の資格情報の入れ替え", () => {
 
   it("取り消しの入口を使い切られても、入れ替えはできる", async () => {
     const { device, enrolled } = await enrollNewDevice();
+    const statuses: number[] = [];
     for (let attempt = 0; attempt < 6; attempt++) {
-      await call("DELETE", `/v1/relay-credentials/${crypto.randomUUID()}`, {
+      const response = await call("DELETE", `/v1/relay-credentials/${crypto.randomUUID()}`, {
         token: enrolled.session.token,
       });
+      statuses.push(response.status);
     }
 
+    expect(statuses).toEqual([404, 404, 404, 404, 404, 429]);
     expect((await rotate(device, enrolled)).status).toBe(201);
   });
 

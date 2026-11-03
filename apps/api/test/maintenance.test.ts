@@ -16,6 +16,7 @@ import {
   ACCEPTED_EVENT_RETENTION_MS,
   cleanupAcceptedEvents,
   cleanupExpiredAuthRecords,
+  REVOKED_RELAY_CREDENTIAL_RETENTION_MS,
 } from "../src/maintenance";
 import { CLOCK_SKEW_MS } from "../src/security/challenge";
 import { testHash } from "./db/helpers";
@@ -157,6 +158,44 @@ it("チャレンジかセッションのどちらかの表が区切りの件数�
     deleted: 1,
     capped: false,
   });
+});
+
+it("取り消してから期間を過ぎた中継の資格情報も消し、区切りの件数に届いたら、消し残しがありうることを返す", async () => {
+  const account = await newAccount();
+  // テストのファイルごとに D1 は分かれる。このファイルのほかのテストの記録と混ざらない、古い時刻で試す。
+  const scheduledTime = Date.parse("1965-01-01T00:00:00.000Z");
+  const revokedAt = scheduledTime - REVOKED_RELAY_CREDENTIAL_RETENTION_MS - 1;
+  const recentRevokedAt = scheduledTime - REVOKED_RELAY_CREDENTIAL_RETENTION_MS + 1;
+  const hashes = [testHash(), testHash(), testHash(), testHash()];
+  await env.DB.batch(
+    hashes.map((hash, index) =>
+      env.DB.prepare(
+        "INSERT INTO relay_credentials (id, account_id, secret_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?)",
+      ).bind(
+        crypto.randomUUID(),
+        account.accountId,
+        hash,
+        revokedAt,
+        index === 3 ? recentRevokedAt : revokedAt,
+      ),
+    ),
+  );
+  const limits = { batch: 2, maxBatches: 1 };
+
+  expect(await cleanupExpiredAuthRecords(env, scheduledTime, limits)).toEqual({
+    deleted: 2,
+    capped: true,
+  });
+  expect(await cleanupExpiredAuthRecords(env, scheduledTime, limits)).toEqual({
+    deleted: 1,
+    capped: false,
+  });
+  const remaining = await env.DB.prepare(
+    "SELECT secret_hash FROM relay_credentials WHERE account_id = ? AND revoked_at IS NOT NULL",
+  )
+    .bind(account.accountId)
+    .all<{ secret_hash: string }>();
+  expect(remaining.results.map((row) => row.secret_hash)).toEqual([hashes[3]]);
 });
 
 it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さない", async () => {

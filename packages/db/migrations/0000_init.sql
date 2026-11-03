@@ -58,7 +58,7 @@ CREATE TABLE `relay_credentials` (
 	`revoked_at` integer,
 	`last_used_at` integer,
 	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "relay_credentials_secret_hash" CHECK(length("relay_credentials"."secret_hash") = 43)
+	CONSTRAINT "relay_credentials_secret_hash" CHECK(length("relay_credentials"."secret_hash") = 43 AND "relay_credentials"."secret_hash" NOT GLOB '*[^A-Za-z0-9_-]*')
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `relay_credentials_secret_hash_unique` ON `relay_credentials` (`secret_hash`);--> statement-breakpoint
@@ -74,7 +74,7 @@ CREATE TABLE `sessions` (
 	`revoked_at` integer,
 	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`installation_id`) REFERENCES `installations`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "sessions_token_hash" CHECK(length("sessions"."token_hash") = 43)
+	CONSTRAINT "sessions_token_hash" CHECK(length("sessions"."token_hash") = 43 AND "sessions"."token_hash" NOT GLOB '*[^A-Za-z0-9_-]*')
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `sessions_token_hash_unique` ON `sessions` (`token_hash`);--> statement-breakpoint

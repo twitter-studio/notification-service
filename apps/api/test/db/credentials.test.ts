@@ -284,15 +284,20 @@ describe("中継の資格情報", () => {
     expect(await findActiveRelayCredential(db, hash, now)).toBeUndefined();
   });
 
-  it("平文のトークンの形 (43 文字でないもの) は置けない", async () => {
+  it("SHA-256 の Base64URL の形 (43 文字) でないもの、平文のトークンは置けない", async () => {
     const db = testDb();
     const alice = await newAccount(db);
 
-    await expect(
-      env.DB.prepare("INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES (?, ?, ?)")
-        .bind(unique("credential"), alice.accountId, `tsr_${"A".repeat(43)}`)
-        .run(),
-    ).rejects.toThrow(/CHECK/);
+    for (const value of [`tsr_${"A".repeat(43)}`, `${"A".repeat(42)}=`, `${"A".repeat(42)}+`]) {
+      await expect(
+        env.DB.prepare(
+          "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES (?, ?, ?)",
+        )
+          .bind(unique("credential"), alice.accountId, value)
+          .run(),
+        value,
+      ).rejects.toThrow(/CHECK/);
+    }
   });
 
   it("取り消してから期間を過ぎた資格情報だけを消す", async () => {
