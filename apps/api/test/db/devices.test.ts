@@ -1,10 +1,12 @@
 import { env } from "cloudflare:workers";
 import {
   type BearerTokenHash,
+  createDb,
   createDeviceVerification,
   type DeviceTokenFingerprint,
   deleteAccount,
   deleteExpiredDeviceVerifications,
+  deleteStaleDevices,
   disableDeviceByUser,
   enableDeviceByUser,
   invalidateDevice,
@@ -448,5 +450,177 @@ describe("端末の確かめの記録", () => {
     expect(await place(fingerprintOf(token))).toBe(true);
     await verifyDevice(db, alice, device);
     expect(await place(fingerprintOf(token))).toBe(false);
+  });
+});
+
+describe("使わなくなった端末の掃除", () => {
+  const before = new Date("2026-10-01T00:00:00.000Z");
+  const old = before.getTime() - 1;
+  const recent = before.getTime() + 1;
+  const window = { invalidatedBefore: before, unverifiedBefore: before };
+
+  async function setUpdatedAt(deviceId: string, updatedAt: number) {
+    await env.DB.prepare("UPDATE devices SET updated_at = ? WHERE id = ?")
+      .bind(updatedAt, deviceId)
+      .run();
+  }
+
+  async function deviceAt(
+    db: ReturnType<typeof testDb>,
+    setup: (owner: Owner, deviceId: string, token: string) => Promise<void>,
+    updatedAt: number,
+  ) {
+    const owner = await newAccount(db);
+    const token = unique("token");
+    const deviceId = deviceIdOf(await registerToken(db, owner, token));
+    await setup(owner, deviceId, token);
+    await setUpdatedAt(deviceId, updatedAt);
+    return deviceId;
+  }
+
+  async function deleteAll(db: ReturnType<typeof testDb>) {
+    let afterRowid = 0;
+    let deleted = 0;
+    for (;;) {
+      const result = await deleteStaleDevices(db, { ...window, afterRowid });
+      deleted += result.deleted;
+      afterRowid = result.lastRowid;
+      if (result.selected === 0) return deleted;
+    }
+  }
+
+  it("APNs が無効と返した端末と、確かめないまま書き換わっていない端末を、期限で消す。止めた端末と確かめた端末は残す", async () => {
+    const db = testDb();
+    const invalidate = async (owner: Owner, deviceId: string, token: string) => {
+      await verifyDevice(db, owner, deviceId);
+      await invalidateDevice(db, { deviceId, tokenFingerprint: fingerprintOf(token) });
+    };
+    const pending = async (owner: Owner, deviceId: string) => {
+      await issueVerification(db, owner, deviceId);
+    };
+    const verify = async (owner: Owner, deviceId: string) => {
+      await verifyDevice(db, owner, deviceId);
+    };
+    const disable = async (owner: Owner, deviceId: string) => {
+      await disableDeviceByUser(db, { accountId: owner.accountId, deviceId });
+    };
+    const removed = [
+      await deviceAt(db, invalidate, old),
+      await deviceAt(db, pending, old),
+      await deviceAt(db, async () => {}, old),
+    ];
+    const kept = [
+      await deviceAt(db, invalidate, recent),
+      await deviceAt(db, async () => {}, recent),
+      await deviceAt(db, verify, old),
+      await deviceAt(db, disable, old),
+    ];
+
+    expect(await deleteAll(db)).toBeGreaterThanOrEqual(removed.length);
+
+    const exists = async (id: string) =>
+      (await env.DB.prepare("SELECT id FROM devices WHERE id = ?").bind(id).first()) !== null;
+    for (const id of removed) expect(await exists(id), id).toBe(false);
+    for (const id of kept) expect(await exists(id), id).toBe(true);
+    // 確かめの途中の記録も、一緒に消える。
+    const verifications = await env.DB.prepare(
+      `SELECT count(*) AS count FROM device_verifications WHERE device_id IN (${removed.map(() => "?").join(",")})`,
+    )
+      .bind(...removed)
+      .first<{ count: number }>();
+    expect(verifications?.count).toBe(0);
+  });
+
+  it("確かめた後に無効と返された端末を消すと、指紋の一意の索引から外れ、ほかのアカウントが同じトークンを確かめられる", async () => {
+    const db = testDb();
+    const before = await newAccount(db);
+    const token = unique("token");
+    const device = await registerVerified(db, before, token);
+    expect(
+      await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(token) }),
+    ).toBe(true);
+    await setUpdatedAt(device, old);
+
+    await deleteAll(db);
+
+    const rows = await env.DB.prepare(
+      "SELECT count(*) AS count FROM devices WHERE token_fingerprint = ?",
+    )
+      .bind(fingerprintOf(token))
+      .first<{ count: number }>();
+    expect(rows?.count).toBe(0);
+    const after = await newAccount(db);
+    const afterDevice = await registerVerified(db, after, token);
+    expect((await listActiveDevices(db, after.accountId)).map((d) => d.id)).toEqual([afterDevice]);
+  });
+
+  it("選んでから消すまでに、登録し直す・止める・確かめると、その端末は消さない", async () => {
+    const db = testDb();
+    const changes: ((owner: Owner, deviceId: string, token: string) => Promise<void>)[] = [
+      async (owner, _, token) => {
+        await registerToken(db, owner, token);
+      },
+      async (owner, deviceId) => {
+        await disableDeviceByUser(db, { accountId: owner.accountId, deviceId });
+      },
+      async (owner, deviceId) => {
+        await verifyDevice(db, owner, deviceId);
+      },
+    ];
+    for (const change of changes) {
+      const owner = await newAccount(db);
+      const token = unique("token");
+      const deviceId = deviceIdOf(await registerToken(db, owner, token));
+      await setUpdatedAt(deviceId, old);
+      // 消す文のバッチの直前に、ほかの要求が端末を書き換える。
+      const racing = new Proxy(env.DB, {
+        get(target, property, receiver) {
+          if (property === "batch") {
+            return async (statements: D1PreparedStatement[]) => {
+              await change(owner, deviceId, token);
+              return target.batch(statements);
+            };
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as D1Database;
+      // 選ぶ範囲を、この端末だけにする。
+      const rowid = await env.DB.prepare("SELECT rowid FROM devices WHERE id = ?")
+        .bind(deviceId)
+        .first<{ rowid: number }>();
+
+      const result = await deleteStaleDevices(
+        createDb(racing),
+        { ...window, afterRowid: (rowid?.rowid ?? 1) - 1 },
+        1,
+      );
+
+      expect(result.selected).toBe(1);
+      expect(result.deleted).toBe(0);
+      expect(
+        await env.DB.prepare("SELECT id FROM devices WHERE id = ?").bind(deviceId).first(),
+      ).not.toBeNull();
+    }
+  });
+
+  it("区切りの件数まで選び、次の区切りは、最後に見た rowid の続きから探す", async () => {
+    const db = testDb();
+    const at = new Date("2001-01-01T00:00:00.000Z");
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index++) {
+      const owner = await newAccount(db);
+      const deviceId = deviceIdOf(await registerToken(db, owner, unique("token")));
+      await setUpdatedAt(deviceId, at.getTime() - 1);
+      ids.push(deviceId);
+    }
+    const window2001 = { invalidatedBefore: at, unverifiedBefore: at };
+
+    const first = await deleteStaleDevices(db, window2001, 2);
+    const second = await deleteStaleDevices(db, { ...window2001, afterRowid: first.lastRowid }, 2);
+
+    expect([first.selected, first.deleted]).toEqual([2, 2]);
+    expect([second.selected, second.deleted]).toEqual([1, 1]);
+    expect(second.lastRowid).toBeGreaterThan(first.lastRowid);
   });
 });

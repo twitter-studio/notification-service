@@ -4,6 +4,7 @@ import {
   deleteExpiredAuthRecords,
   deleteExpiredDeviceVerifications,
   deleteRevokedRelayCredentials,
+  deleteStaleDevices,
 } from "@notification-service/db";
 import { CLOCK_SKEW_MS } from "./security/challenge";
 
@@ -19,6 +20,12 @@ export const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** 取り消した中継の資格情報を残す期間。入れ替えの上限 (1 時間あたり) を数えるのに使うので、それより長くする。 */
 export const REVOKED_RELAY_CREDENTIAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** APNs が無効と返した端末の行を残す期間。同じインストールが登録し直せば戻るので、少しのあいだは残す。 */
+export const INVALIDATED_DEVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** 確かめていない端末の行を残す期間。アプリは起動のたびに登録し直すので、使っている端末なら、この間に書き換わる。 */
+export const UNVERIFIED_DEVICE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** 1 回に消す件数 (`batch`) と、1 回の掃除でくり返す上限 (`maxBatches`)。残りは次の掃除で消す。 */
 export type CleanupLimits = { batch: number; maxBatches: number };
@@ -71,6 +78,32 @@ export async function cleanupExpiredAuthRecords(
     // どの表も、区切りの件数より少なければ、消し残しはない。
     if ([challenges, sessions, credentials, verifications].every((count) => count < limits.batch))
       return { deleted, capped: false };
+  }
+  return { deleted, capped: true };
+}
+
+/**
+ * 定期の掃除 (Cron)。使わなくなった端末の行 (APNs が無効と返したもの、確かめないまま書き換わっていないもの) を、件数を区切って消す
+ * (ADR-0004)。利用者が止めた端末は消さない。
+ */
+export async function cleanupStaleDevices(
+  env: Env,
+  scheduledTime: number,
+  limits = DEFAULT_LIMITS,
+): Promise<CleanupResult> {
+  const db = createDb(env.DB);
+  const input = {
+    invalidatedBefore: new Date(scheduledTime - INVALIDATED_DEVICE_RETENTION_MS),
+    unverifiedBefore: new Date(scheduledTime - UNVERIFIED_DEVICE_RETENTION_MS),
+  };
+  let deleted = 0;
+  let afterRowid = 0;
+  for (let batch = 0; batch < limits.maxBatches; batch++) {
+    const result = await deleteStaleDevices(db, { ...input, afterRowid }, limits.batch);
+    deleted += result.deleted;
+    afterRowid = result.lastRowid;
+    // 選んだ数で決める (選んだ後に登録し直されて消さなかった行があっても、続きを探す)。
+    if (result.selected < limits.batch) return { deleted, capped: false };
   }
   return { deleted, capped: true };
 }

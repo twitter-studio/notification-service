@@ -9,7 +9,10 @@ import {
   completeEvent,
   createDb,
   createSession,
+  type DeviceTokenCiphertext,
+  type DeviceTokenFingerprint,
   enrollInstallation,
+  registerDeviceToken,
 } from "@notification-service/db";
 import { expect, it } from "vitest";
 import worker from "../src/index";
@@ -17,6 +20,8 @@ import {
   ACCEPTED_EVENT_RETENTION_MS,
   cleanupAcceptedEvents,
   cleanupExpiredAuthRecords,
+  cleanupStaleDevices,
+  INVALIDATED_DEVICE_RETENTION_MS,
   REVOKED_RELAY_CREDENTIAL_RETENTION_MS,
 } from "../src/maintenance";
 import { CLOCK_SKEW_MS } from "../src/security/challenge";
@@ -198,6 +203,35 @@ it("取り消してから期間を過ぎた中継の資格情報も消し、区�
     .bind(account.accountId)
     .all<{ secret_hash: string }>();
   expect(remaining.results.map((row) => row.secret_hash)).toEqual([hashes[3]]);
+});
+
+it("APNs が無効と返してから期間を過ぎた端末を、定期の掃除で消す", async () => {
+  const account = await newAccount();
+  const scheduledTime = Date.parse("2026-11-10T18:17:00.000Z");
+  const db = createDb(env.DB);
+  const fingerprint = `f1.stale-${crypto.randomUUID()}`;
+  const registered = await registerDeviceToken(db, {
+    accountId: account.accountId,
+    installationId: account.installationId,
+    apnsTokenCiphertext: `v1.test.${crypto.randomUUID()}` as DeviceTokenCiphertext,
+    tokenFingerprint: fingerprint as DeviceTokenFingerprint,
+    apnsEnvironment: "sandbox",
+    topic: "com.twitter-studio.Tweetbot",
+    challenge: { nonce: `nonce-${crypto.randomUUID()}`, expiresAt: new Date(Date.now() + 60_000) },
+  });
+  if (registered.kind !== "registered") throw new Error("device was not registered");
+  await env.DB.prepare("UPDATE devices SET state = 'invalidated', updated_at = ? WHERE id = ?")
+    .bind(scheduledTime - INVALIDATED_DEVICE_RETENTION_MS - 1, registered.deviceId)
+    .run();
+
+  const result = await cleanupStaleDevices(env, scheduledTime);
+
+  expect(result.deleted).toBeGreaterThanOrEqual(1);
+  expect(
+    await env.DB.prepare("SELECT id FROM devices WHERE token_fingerprint = ?")
+      .bind(fingerprint)
+      .first(),
+  ).toBeNull();
 });
 
 it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さない", async () => {
