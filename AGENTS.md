@@ -101,6 +101,7 @@ pnpm build       # wrangler deploy --dry-run。デプロイはしない
 - wrangler と `@cloudflare/*` は、Dependabot が 1 つの PR にまとめる。その PR は型の版が変わるので `typecheck` で落ちる。PR のブランチで `types` を動かし、型を作り直して push する。`compatibility_date` は、`@cloudflare/vitest-plugin` に付く workerd が対応する日付より新しくしない (ADR-0002)。
 - Node.js の版は `mise.toml` と `.github/workflows/ci.yml` の 2 か所にある。そろえて上げる (ADR-0003)。
 - 公開の API は `@hono/zod-openapi` のスキーマで先に決め、生成したものを手で直さない。エラーの応答は `src/problem.ts` の problem+json にし、`request_id` はサーバーで作る。エラーの文は応答にもログにも出さない。
+- APNs のデバイストークンは、`src/security/device-token.ts` で暗号化して DB に置き、指紋 (HMAC) で一意にする (ADR-0005)。暗号化の鍵を入れ替えるときは、新しい鍵を足して current にし、古い鍵は古い暗号文がなくなるまで残す。指紋の鍵は入れ替えない。トークンや鍵の値は、ログにもエラーの文にも出さない。
 - `observability` のログにはリクエストのヘッダーも残る。秘密を独自のヘッダーで受けるときは、ログに残らないかを確かめる。
 - `wrangler deploy` を `--dry-run` なしで動かさない (デプロイはオーナーの承認を得てから)。Cloudflare の資格情報と秘密は、このリポジトリに置かない。
 - `GET /health` などの公開の応答に、版、設定、秘密の有無を出さない。

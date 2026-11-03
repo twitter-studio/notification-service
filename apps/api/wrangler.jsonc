@@ -14,6 +14,10 @@
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
+  // 受け付けの記録の定期の掃除 (src/maintenance.ts)。1 日 1 回、混み合う時刻を避ける。
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  },
   "observability": {
     "enabled": true
   }
