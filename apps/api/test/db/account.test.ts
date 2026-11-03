@@ -58,7 +58,7 @@ describe("インストールの取り消しと、アカウントの削除", () =
       .run();
     await registerVerified(db, alice, unique("token"));
     await registerVerified(db, bob, unique("token"));
-    await beginEvent(db, { accountId: alice.accountId, eventId: "e1" });
+    await beginEvent(db, { accountId: alice.accountId, eventKey: "e1" });
 
     expect(await deleteAccount(db, { accountId: alice.accountId })).toBe(true);
 

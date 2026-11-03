@@ -6,11 +6,11 @@ import {
   registerDeviceToken,
   revokeRelayCredential,
 } from "@notification-service/db";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
-import type { OutgoingNotification } from "../src/notifications/payload";
+import { eventKeyOf, type OutgoingNotification } from "../src/notifications/payload";
 import type { PushOutcome, PushTarget } from "../src/notifications/push";
-import { MAX_EVENT_AGE_MS } from "../src/routes/notifications";
+import { MAX_EVENT_AGE_MS, MAX_EVENTS_PER_DAY } from "../src/routes/notifications";
 import { loadDeviceTokenKeys, sealDeviceToken } from "../src/security/device-token";
 import { consumedChallenge, TOPIC, verifyDevice } from "./db/helpers";
 import { type Enrolled, enrollNewDevice, expectProblem } from "./helpers/api";
@@ -100,7 +100,7 @@ describe("中継の受け付け", () => {
       topic: TOPIC,
     });
     expect(sent[0]?.notification).toEqual({
-      eventId: event.event_id,
+      eventKey: await eventKeyOf(event.event_id),
       payload: {
         aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
         event_type: "mention",
@@ -140,7 +140,7 @@ describe("中継の受け付け", () => {
     const event = newEvent();
     await beginEvent(createDb(env.DB), {
       accountId: alice.enrolled.account_id,
-      eventId: event.event_id,
+      eventKey: await eventKeyOf(event.event_id),
     });
 
     const response = await relay(app, alice.enrolled.relay_secret, event);
@@ -201,6 +201,9 @@ describe("中継の受け付け", () => {
       { type: "dm" },
       { post_id: "abc" },
       { post_id: "0123" },
+      { post_id: "12345678901234567890" },
+      { post_id: undefined },
+      { type: "follow" },
       { event_id: "has space" },
       { event_id: "" },
       { occurred_at: "2026-11-04T09:00:00+09:00" },
@@ -261,8 +264,172 @@ describe("中継の受け付け", () => {
     const { app } = appWithPush();
     const alice = await accountWithDevice();
 
-    await expectLimitReached(60, async () =>
+    await expectLimitReached(30, async () =>
       outcomeOf((await relay(app, alice.enrolled.relay_secret, newEvent())).status, 202),
     );
   });
+
+  it("形の違う本文も、アカウントごとの回数に数える", async () => {
+    const { app } = appWithPush();
+    const alice = await accountWithDevice();
+
+    await expectLimitReached(30, async () =>
+      outcomeOf(
+        (await relay(app, alice.enrolled.relay_secret, newEvent({ type: "unknown" }))).status,
+        422,
+      ),
+    );
+  });
+
+  it("follow は post_id なしで受け、通知にも post_id を入れない", async () => {
+    const { app, sent } = appWithPush();
+    const alice = await accountWithDevice();
+
+    const response = await relay(
+      app,
+      alice.enrolled.relay_secret,
+      newEvent({ type: "follow", post_id: undefined }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(sent[0]?.notification.payload).toEqual({
+      aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
+      event_type: "follow",
+    });
+  });
+
+  it("処理中のまま 2 分を過ぎた記録は、やり直しで引き継いで送る", async () => {
+    const { app, sent } = appWithPush();
+    const alice = await accountWithDevice();
+    const event = newEvent();
+    await beginEvent(
+      createDb(env.DB),
+      { accountId: alice.enrolled.account_id, eventKey: await eventKeyOf(event.event_id) },
+      new Date(Date.now() - 3 * 60 * 1000),
+    );
+
+    const response = await relay(app, alice.enrolled.relay_secret, event);
+
+    expect(await response.json()).toEqual({ event_id: event.event_id, status: "accepted" });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("端末に送れなかった (やり直し、失敗、読めない暗号文) ときも 202 で、error のログに数を出し、秘密を出さない", async () => {
+    for (const outcome of ["retry_later", "failed"] as const) {
+      const { app } = appWithPush(async () => outcome);
+      const alice = await accountWithDevice();
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      expect((await relay(app, alice.enrolled.relay_secret, newEvent())).status).toBe(202);
+
+      const logged = JSON.stringify(errors.mock.calls);
+      expect(logged).toContain(`\\"${outcome}\\":1`);
+      expect(logged).not.toContain(alice.apnsToken);
+      expect(logged).not.toContain(alice.enrolled.relay_secret ?? "");
+      errors.mockRestore();
+    }
+
+    const { app, sent } = appWithPush();
+    const alice = await accountWithDevice();
+    await env.DB.prepare(
+      "UPDATE devices SET apns_token_ciphertext = 'v1.test-1.AAAA.AAAA' WHERE id = ?",
+    )
+      .bind(alice.deviceId)
+      .run();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await relay(app, alice.enrolled.relay_secret, newEvent())).status).toBe(202);
+    expect(JSON.stringify(errors.mock.calls)).toContain('\\"unreadable\\":1');
+    expect(sent).toEqual([]);
+    errors.mockRestore();
+  });
+
+  it("受け付けの記録を書けないときは 503、送った後に済みにできないときは 202", async () => {
+    const alice = await accountWithDevice();
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { app, sent } = appWithPush();
+    const send = (db: D1Database) =>
+      app.request(
+        "https://notification.test/v1/notifications",
+        {
+          method: "POST",
+          headers: relayHeaders(alice.enrolled.relay_secret),
+          body: JSON.stringify(newEvent()),
+        },
+        { ...env, DB: db },
+      );
+
+    const beginFails = await send(failingD1(env.DB, /INSERT INTO delivery_dedup/i));
+    expect(beginFails.headers.get("Retry-After")).toBe("60");
+    await expectProblem(beginFails, 503);
+    expect(sent).toEqual([]);
+
+    const completeFails = await send(failingD1(env.DB, /update "delivery_dedup"/i));
+    expect(completeFails.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    quiet.mockRestore();
+  });
+
+  it("1 日に受け付けられる数を超えると 429 で、送らない", async () => {
+    const { app, sent } = appWithPush();
+    const alice = await accountWithDevice();
+    await env.DB.prepare(`
+      WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?2)
+      INSERT INTO delivery_dedup (account_id, event_key, accepted_at, state, updated_at)
+      SELECT ?1, 'filler-' || i, ?3, 'done', ?3 FROM n`)
+      .bind(alice.enrolled.account_id, MAX_EVENTS_PER_DAY, Date.now() - 60_000)
+      .run();
+
+    const response = await relay(app, alice.enrolled.relay_secret, newEvent());
+
+    expect(response.headers.get("Retry-After")).toBe("3600");
+    await expectProblem(response, 429);
+    expect(sent).toEqual([]);
+  });
+
+  it("受け付けの記録には、event_id の生の値を置かない", async () => {
+    const { app } = appWithPush();
+    const alice = await accountWithDevice();
+    const event = newEvent({ event_id: "mention:1234567890123456789" });
+
+    await relay(app, alice.enrolled.relay_secret, event);
+
+    const rows = await env.DB.prepare("SELECT event_key FROM delivery_dedup WHERE account_id = ?")
+      .bind(alice.enrolled.account_id)
+      .all<{ event_key: string }>();
+    expect(rows.results.map((row) => row.event_key)).toEqual([await eventKeyOf(event.event_id)]);
+    expect(JSON.stringify(rows.results)).not.toContain("1234567890123456789");
+  });
 });
+
+function relayHeaders(secret: string | undefined): Record<string, string> {
+  const headers = jsonHeaders();
+  if (secret !== undefined) headers.Authorization = `Bearer ${secret}`;
+  return headers;
+}
+
+/** SQL が `pattern` に合う文だけを失敗させる D1 (それ以外は、そのまま渡す)。 */
+function failingD1(db: D1Database, pattern: RegExp): D1Database {
+  return new Proxy(db, {
+    get(target, property, receiver) {
+      if (property === "prepare") {
+        return (sql: string) => {
+          if (!pattern.test(sql)) return target.prepare(sql);
+          const failing: unknown = new Proxy(
+            {},
+            {
+              get: (_, name) =>
+                name === "bind"
+                  ? () => failing
+                  : async () => {
+                      throw new Error("D1_ERROR: injected failure");
+                    },
+            },
+          );
+          return failing;
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}

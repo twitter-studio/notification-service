@@ -23,9 +23,11 @@ export type PushOutcome =
   /** APNs へ送る仕組みがまだない。 */
   | "not_configured";
 
+/** `signal` は、送る時間の上限 (受け付けの記録のリースより短い)。送り手は、これで APNs への要求をやめる。 */
 export type PushGateway = (
   target: PushTarget,
   notification: OutgoingNotification,
+  options: { signal: AbortSignal },
 ) => Promise<PushOutcome>;
 
 /** APNs へ送る仕組み (APNS-002) がまだないあいだの送り手。送らない。 */

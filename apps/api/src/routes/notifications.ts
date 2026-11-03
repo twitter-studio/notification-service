@@ -2,15 +2,22 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   beginEvent,
   completeEvent,
+  countAcceptedEventsSince,
   createDb,
   invalidateDevice,
   listActiveDevices,
   releaseEvent,
 } from "@notification-service/db";
-import type { AppEnv } from "../app";
+import { createMiddleware } from "hono/factory";
+import type { AppEnv, RelayEnv } from "../app";
 import { ACCEPTED_EVENT_RETENTION_MS, CLEANUP_INTERVAL_MS } from "../maintenance";
 import { requireRelayCredential } from "../middleware/relay";
-import { EVENT_TYPES, notificationPayload } from "../notifications/payload";
+import {
+  EVENT_TYPES,
+  EVENT_TYPES_WITHOUT_POST,
+  eventKeyOf,
+  notificationPayload,
+} from "../notifications/payload";
 import type { PushGateway, PushOutcome } from "../notifications/push";
 import { ProblemError } from "../problem";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
@@ -30,29 +37,44 @@ export const EVENT_CLOCK_SKEW_MS = 5 * 60 * 1000;
 export const MAX_EVENT_AGE_MS =
   ACCEPTED_EVENT_RETENTION_MS - CLEANUP_INTERVAL_MS - EVENT_CLOCK_SKEW_MS;
 
-/** 処理中のやり直しに待ってもらう秒数。 */
-const IN_PROGRESS_RETRY_AFTER_SECONDS = 30;
+/**
+ * 1 つのアカウントが 1 日に受け付けられるイベントの数。D1 の書き込み (無料のプランで 1 日 10 万行) を、1 つのアカウントで
+ * 使い切らせない。受け付けの記録は数として残るので、DB で数える (ADR-0009)。
+ */
+export const MAX_EVENTS_PER_DAY = 1000;
 
-/** 送れなかったときに待ってもらう秒数。 */
+/** 端末へ送る時間の上限。受け付けの記録のリース (2 分) より短くし、引き継がれる前に送り終える。 */
+export const SEND_BUDGET_MS = 60 * 1000;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const IN_PROGRESS_RETRY_AFTER_SECONDS = 30;
 const UNAVAILABLE_RETRY_AFTER_SECONDS = 60;
+const DAILY_LIMIT_RETRY_AFTER_SECONDS = 60 * 60;
 
 const EventSchema = z
   .strictObject({
     event_id: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/),
     type: z.enum(EVENT_TYPES),
+    // X の ID (64 ビットの整数) は 19 桁まで。
     post_id: z
       .string()
-      .regex(/^[1-9][0-9]{0,19}$/)
+      .regex(/^[1-9][0-9]{0,18}$/)
       .optional(),
     // UTC (末尾が Z) だけを受ける。
     occurred_at: z.iso.datetime(),
   })
   .openapi("RelayEvent");
 
+/** 資格情報を確かめた後、本文を確かめる前に数える (形の違う本文も数える)。 */
+const relayRateLimit = createMiddleware<RelayEnv>(async (c, next) => {
+  await enforceRateLimit(c.env.RELAY_RATE_LIMITER, `relay:${c.get("relayCredential").accountId}`);
+  await next();
+});
+
 const route = createRoute({
   method: "post",
   path: "/v1/notifications",
-  middleware: [requireRelayCredential] as const,
+  middleware: [requireRelayCredential, relayRateLimit] as const,
   summary: "利用者の Worker からイベントを受け付け、中継の資格情報のアカウントの端末へ送る",
   request: {
     body: { required: true, content: { "application/json": { schema: EventSchema } } },
@@ -76,11 +98,18 @@ const route = createRoute({
   },
 });
 
+function unavailable(): ProblemError {
+  return new ProblemError(503, "Service Unavailable", undefined, {
+    "Retry-After": String(UNAVAILABLE_RETRY_AFTER_SECONDS),
+  });
+}
+
 export function registerNotifications(app: OpenAPIHono<AppEnv>, push: PushGateway) {
   app.openapi(route, async (c) => {
     const credential = c.get("relayCredential");
-    await enforceRateLimit(c.env.RELAY_RATE_LIMITER, `relay:${credential.accountId}`);
     const body = c.req.valid("json");
+    if (EVENT_TYPES_WITHOUT_POST.has(body.type) === (body.post_id !== undefined))
+      throw new ProblemError(422, "Unprocessable Content", "The post ID does not match the type.");
     const now = new Date();
     const occurredAt = Date.parse(body.occurred_at);
     if (
@@ -90,9 +119,41 @@ export function registerNotifications(app: OpenAPIHono<AppEnv>, push: PushGatewa
       throw new ProblemError(422, "Unprocessable Content", "The event time is out of range.");
 
     const db = createDb(c.env.DB);
-    const event = { accountId: credential.accountId, eventId: body.event_id };
-    // 受け付けの記録には、サーバーの時刻を渡す (送り手の時刻で、記録を早く消させない)。
-    const start = await beginEvent(db, event, now);
+    const logFailure = (event: string, error: unknown) =>
+      console.error(
+        JSON.stringify({
+          event,
+          request_id: c.get("requestId"),
+          name: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+    const event = { accountId: credential.accountId, eventKey: await eventKeyOf(body.event_id) };
+    const accepted = { event_id: body.event_id, status: "accepted" as const };
+
+    let devices: Awaited<ReturnType<typeof listActiveDevices>>;
+    let start: Awaited<ReturnType<typeof beginEvent>>;
+    try {
+      devices = await listActiveDevices(db, credential.accountId);
+      // 送り先がなければ、記録を書かずに受け付ける (D1 の書き込みを使わない)。
+      if (devices.length === 0) return c.json(accepted, 202);
+      if (
+        (await countAcceptedEventsSince(
+          db,
+          credential.accountId,
+          new Date(now.getTime() - DAY_MS),
+        )) >= MAX_EVENTS_PER_DAY
+      ) {
+        throw new ProblemError(429, "Too Many Requests", undefined, {
+          "Retry-After": String(DAILY_LIMIT_RETRY_AFTER_SECONDS),
+        });
+      }
+      // 受け付けの記録には、サーバーの時刻を渡す (送り手の時刻で、記録を早く消させない)。
+      start = await beginEvent(db, event, now);
+    } catch (error) {
+      if (error instanceof ProblemError) throw error;
+      logFailure("relay_accept_failed", error);
+      throw unavailable();
+    }
     if (start.kind === "done")
       return c.json({ event_id: body.event_id, status: "duplicate" as const }, 202);
     if (start.kind === "in_progress") {
@@ -100,16 +161,17 @@ export function registerNotifications(app: OpenAPIHono<AppEnv>, push: PushGatewa
         "Retry-After": String(IN_PROGRESS_RETRY_AFTER_SECONDS),
       });
     }
+    const lease = { ...event, leaseId: start.leaseId };
 
-    const outcomes: Partial<Record<PushOutcome | "unreadable", number>> = {};
-    const count = (outcome: PushOutcome | "unreadable") => {
+    const outcomes: Partial<Record<PushOutcome | "unreadable" | "skipped", number>> = {};
+    const count = (outcome: PushOutcome | "unreadable" | "skipped") => {
       outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
     };
+    const deadline = Date.now() + SEND_BUDGET_MS;
     try {
-      const devices = await listActiveDevices(db, credential.accountId);
-      const keys = devices.length > 0 ? await loadDeviceTokenKeys(c.env) : undefined;
+      const keys = await loadDeviceTokenKeys(c.env);
       const notification = {
-        eventId: body.event_id,
+        eventKey: event.eventKey,
         payload: notificationPayload({
           eventId: body.event_id,
           type: body.type,
@@ -117,7 +179,12 @@ export function registerNotifications(app: OpenAPIHono<AppEnv>, push: PushGatewa
         }),
       };
       for (const device of devices) {
-        if (keys === undefined) break;
+        const remaining = deadline - Date.now();
+        // 時間の上限を過ぎたら、残りの端末には送らない (リースが切れて、引き継いだ要求と 2 回送らないため)。
+        if (remaining <= 0) {
+          count("skipped");
+          continue;
+        }
         let apnsToken: string;
         try {
           apnsToken = await openDeviceToken(keys, {
@@ -140,6 +207,7 @@ export function registerNotifications(app: OpenAPIHono<AppEnv>, push: PushGatewa
             topic: device.topic,
           },
           notification,
+          { signal: AbortSignal.timeout(remaining) },
         );
         count(outcome);
         if (outcome === "invalid_token")
@@ -149,24 +217,26 @@ export function registerNotifications(app: OpenAPIHono<AppEnv>, push: PushGatewa
           });
       }
     } catch (error) {
-      // 送る前のどこかで失敗した (D1、鍵の設定など)。受け付けの記録を消し、送り手のやり直しを受け付ける。
+      // 送る途中で失敗した (D1、鍵の設定など)。受け付けの記録を消し、送り手のやり直しを受け付ける。
       // 途中まで送っていたら、やり直しで同じ通知が 2 回届きうる (配信は少なくとも 1 回。ADR-0001 §5)。
-      await releaseEvent(db, event).catch(() => {});
-      console.error(
-        JSON.stringify({
-          event: "relay_delivery_failed",
-          request_id: c.get("requestId"),
-          name: error instanceof Error ? error.name : "unknown",
-        }),
-      );
-      throw new ProblemError(503, "Service Unavailable", undefined, {
-        "Retry-After": String(UNAVAILABLE_RETRY_AFTER_SECONDS),
-      });
+      await releaseEvent(db, lease).catch(() => {});
+      logFailure("relay_delivery_failed", error);
+      throw unavailable();
     }
-    await completeEvent(db, event);
-    console.log(
+
+    // 送った後に記録を済みにできなくても、送ったので 202 を返す (503 にすると、やり直しでもう 1 回送る)。
+    // 記録は処理中のまま残り、リースが切れた後のやり直しで、もう 1 回送りうる。
+    await completeEvent(db, lease).catch((error: unknown) =>
+      logFailure("relay_complete_failed", error),
+    );
+    const incomplete = (["unreadable", "failed", "retry_later", "skipped"] as const).some(
+      (outcome) => (outcomes[outcome] ?? 0) > 0,
+    );
+    // 送れなかった端末があれば、運営が気づけるよう error で出す (鍵の入れ替えの誤り、APNs の止まりなど)。
+    // 今は端末ごとにやり直さないので、その通知は届かない (APNS-002 でやり直しを決める)。
+    (incomplete ? console.error : console.log)(
       JSON.stringify({ event: "relay_delivered", request_id: c.get("requestId"), outcomes }),
     );
-    return c.json({ event_id: body.event_id, status: "accepted" as const }, 202);
+    return c.json(accepted, 202);
   });
 }

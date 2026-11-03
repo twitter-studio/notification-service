@@ -32,7 +32,7 @@ describe("D1 のスキーマ", () => {
       env.DB.prepare(
         "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES (?, ?, ?)",
       ).bind(unique("credential"), missing, testHash()),
-      env.DB.prepare("INSERT INTO delivery_dedup (account_id, event_id) VALUES (?, 'e')").bind(
+      env.DB.prepare("INSERT INTO delivery_dedup (account_id, event_key) VALUES (?, 'e')").bind(
         missing,
       ),
     ];

@@ -5,70 +5,113 @@ import { deliveryDedup } from "./schema";
 /** 処理中のまま、この時間より長く書き直していない記録は、止まったものとみなし、やり直しで引き継ぐ。 */
 export const EVENT_PROCESSING_LEASE_MS = 2 * 60 * 1000;
 
+/** イベントの記録の鍵。`eventKey` は、送り手の event_id のハッシュ (呼ぶ側が作る)。 */
+export type EventRef = { accountId: string; eventKey: string };
+
 export type EventStart =
-  /** 受け付けた (初めて、または止まった処理中の記録を引き継いだ)。送ったら `completeEvent`、送れなかったら `releaseEvent`。 */
-  | { kind: "accepted" }
+  /**
+   * 受け付けた (初めて、または止まった処理中の記録を引き継いだ)。送ったら `completeEvent`、送れなかったら `releaseEvent` を、
+   * この `leaseId` で呼ぶ。
+   */
+  | { kind: "accepted"; leaseId: string }
   /** 同じイベントは、もう送った (送り手のやり直し)。 */
   | { kind: "done" }
   /** 同じイベントを、ほかの要求が送っている途中。少し待ってやり直してもらう。 */
   | { kind: "in_progress" };
 
 /**
- * イベントを受け付ける。同じアカウントの同じ event_id は、1 回だけ受け付ける (送り手のやり直しで 2 回送らない)。
+ * イベントを受け付ける。同じアカウントの同じイベントは、1 回だけ受け付ける (送り手のやり直しで 2 回送らない)。
  * `now` にはサーバーの時刻を渡す。送り手のイベントの時刻 (`occurred_at`) を渡すと、記録を過去の日付にして早く消させられる。
  * 記録を残す期間より古いイベントは、ここに来る前に、イベントの時刻の新しさで拒む (ADR-0009)。
  * 記録を残す期間は、送り手がやり直す期間より長くする。
  */
-export async function beginEvent(
-  db: Db,
-  input: { accountId: string; eventId: string },
-  now = new Date(),
-): Promise<EventStart> {
+export async function beginEvent(db: Db, input: EventRef, now = new Date()): Promise<EventStart> {
+  const leaseId = crypto.randomUUID();
   // 新しい記録を置くか、止まった処理中の記録を引き継ぐ (1 文で行い、同時に来ても受け付けるのは 1 つだけ)。
   const taken = await db.$client
     .prepare(`
-      INSERT INTO delivery_dedup (account_id, event_id, accepted_at, state, updated_at)
-      VALUES (?1, ?2, ?3, 'processing', ?3)
-      ON CONFLICT (account_id, event_id) DO UPDATE SET updated_at = excluded.updated_at
+      INSERT INTO delivery_dedup (account_id, event_key, accepted_at, state, updated_at, lease_id)
+      VALUES (?1, ?2, ?3, 'processing', ?3, ?5)
+      ON CONFLICT (account_id, event_key) DO UPDATE SET
+        updated_at = excluded.updated_at, lease_id = excluded.lease_id
         WHERE delivery_dedup.state = 'processing' AND delivery_dedup.updated_at < ?4
-      RETURNING state`)
-    .bind(input.accountId, input.eventId, now.getTime(), now.getTime() - EVENT_PROCESSING_LEASE_MS)
-    .first<{ state: string }>();
-  if (taken !== null) return { kind: "accepted" };
+      RETURNING lease_id`)
+    .bind(
+      input.accountId,
+      input.eventKey,
+      now.getTime(),
+      now.getTime() - EVENT_PROCESSING_LEASE_MS,
+      leaseId,
+    )
+    .first<{ lease_id: string }>();
+  if (taken !== null) return { kind: "accepted", leaseId };
   const existing = await db.$client
-    .prepare("SELECT state FROM delivery_dedup WHERE account_id = ?1 AND event_id = ?2")
-    .bind(input.accountId, input.eventId)
+    .prepare("SELECT state FROM delivery_dedup WHERE account_id = ?1 AND event_key = ?2")
+    .bind(input.accountId, input.eventKey)
     .first<{ state: string }>();
   // 読むまでのあいだに記録が消えた (送れずに消した) ときも、やり直してもらう。
   return existing?.state === "done" ? { kind: "done" } : { kind: "in_progress" };
 }
 
-/** 送り終えた。以後の同じイベントは、済んだ重複として答える。 */
+/**
+ * 送り終えた。以後の同じイベントは、済んだ重複として答える。今の印を持つ処理中の記録だけを書き換え、書き換えたら true。
+ * 引き継がれた後の前の要求は、何も変えない (引き継いだ要求が送る)。
+ */
 export async function completeEvent(
   db: Db,
-  input: { accountId: string; eventId: string },
+  input: EventRef & { leaseId: string },
   now = new Date(),
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const rows = await db
     .update(deliveryDedup)
     .set({ state: "done", updatedAt: now })
     .where(
-      and(eq(deliveryDedup.accountId, input.accountId), eq(deliveryDedup.eventId, input.eventId)),
-    );
+      and(
+        eq(deliveryDedup.accountId, input.accountId),
+        eq(deliveryDedup.eventKey, input.eventKey),
+        eq(deliveryDedup.leaseId, input.leaseId),
+        eq(deliveryDedup.state, "processing"),
+      ),
+    )
+    .returning({ eventKey: deliveryDedup.eventKey });
+  return rows.length > 0;
 }
 
-/** 受け付けの記録を消す (受け付けたあとに送れなかったとき)。消したら true。 */
+/**
+ * 受け付けの記録を消す (受け付けたあとに送れなかったとき)。今の印を持つ処理中の記録だけを消し、消したら true。
+ * 引き継がれた記録や、済んだ記録は消さない (消すと、同じイベントをもう 1 回送ってしまう)。
+ */
 export async function releaseEvent(
   db: Db,
-  input: { accountId: string; eventId: string },
+  input: EventRef & { leaseId: string },
 ): Promise<boolean> {
   const result = await db
     .delete(deliveryDedup)
     .where(
-      and(eq(deliveryDedup.accountId, input.accountId), eq(deliveryDedup.eventId, input.eventId)),
+      and(
+        eq(deliveryDedup.accountId, input.accountId),
+        eq(deliveryDedup.eventKey, input.eventKey),
+        eq(deliveryDedup.leaseId, input.leaseId),
+        eq(deliveryDedup.state, "processing"),
+      ),
     )
     .run();
   return result.meta.changes > 0;
+}
+
+/** アカウントが `since` より後に受け付けたイベントの数 (1 日の上限を数える)。 */
+export async function countAcceptedEventsSince(
+  db: Db,
+  accountId: string,
+  since: Date,
+): Promise<number> {
+  const row = await db.$client
+    .prepare(
+      "SELECT count(*) AS count FROM delivery_dedup WHERE account_id = ?1 AND accepted_at > ?2",
+    )
+    .bind(accountId, since.getTime())
+    .first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 /**

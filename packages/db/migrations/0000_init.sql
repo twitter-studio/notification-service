@@ -1,15 +1,16 @@
 CREATE TABLE `delivery_dedup` (
 	`account_id` text NOT NULL,
-	`event_id` text NOT NULL,
+	`event_key` text NOT NULL,
 	`accepted_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
 	`state` text DEFAULT 'processing' NOT NULL,
 	`updated_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
-	PRIMARY KEY(`account_id`, `event_id`),
+	`lease_id` text,
+	PRIMARY KEY(`account_id`, `event_key`),
 	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "delivery_dedup_state" CHECK("delivery_dedup"."state" IN ('processing', 'done'))
 );
 --> statement-breakpoint
-CREATE INDEX `idx_delivery_dedup_accepted` ON `delivery_dedup` (`accepted_at`);--> statement-breakpoint
+CREATE INDEX `idx_delivery_dedup_account_accepted` ON `delivery_dedup` (`account_id`,`accepted_at`);--> statement-breakpoint
 CREATE TABLE `device_verifications` (
 	`device_id` text PRIMARY KEY NOT NULL,
 	`code_hash` text NOT NULL,

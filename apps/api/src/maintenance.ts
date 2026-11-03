@@ -23,7 +23,8 @@ export const REVOKED_RELAY_CREDENTIAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 /** 1 回に消す件数 (`batch`) と、1 回の掃除でくり返す上限 (`maxBatches`)。残りは次の掃除で消す。 */
 export type CleanupLimits = { batch: number; maxBatches: number };
 
-const DEFAULT_LIMITS: CleanupLimits = { batch: 500, maxBatches: 20 };
+/** 1 回の掃除で消せるのは、表ごとに 5 万件まで。受け付けの上限 (アカウントごとに 1 日 1,000 件。ADR-0009) の 50 アカウント分。 */
+const DEFAULT_LIMITS: CleanupLimits = { batch: 500, maxBatches: 100 };
 
 export type CleanupResult = {
   deleted: number;

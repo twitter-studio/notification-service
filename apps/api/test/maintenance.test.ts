@@ -45,12 +45,15 @@ it("定期の掃除は、残す期間より古い受け付けの記録だけを�
   const account = await newAccount();
   const scheduledTime = Date.parse("2026-11-10T18:17:00.000Z");
   const cutoff = scheduledTime - ACCEPTED_EVENT_RETENTION_MS;
-  const old = { accountId: account.accountId, eventId: "old" };
-  const boundary = { accountId: account.accountId, eventId: "boundary" };
-  await beginEvent(db, old, new Date(cutoff - 1));
-  await completeEvent(db, old);
-  await beginEvent(db, boundary, new Date(cutoff));
-  await completeEvent(db, boundary);
+  const old = { accountId: account.accountId, eventKey: "old" };
+  const boundary = { accountId: account.accountId, eventKey: "boundary" };
+  for (const [event, at] of [
+    [old, cutoff - 1],
+    [boundary, cutoff],
+  ] as const) {
+    const start = await beginEvent(db, event, new Date(at));
+    if (start.kind === "accepted") await completeEvent(db, { ...event, leaseId: start.leaseId });
+  }
 
   await runCleanup(scheduledTime);
 
@@ -64,7 +67,7 @@ it("消す記録が多くても、件数を区切ってくり返し、全部消�
   const old = scheduledTime - ACCEPTED_EVENT_RETENTION_MS - 1;
   const inserts = Array.from({ length: 1201 }, (_, i) =>
     env.DB.prepare(
-      "INSERT INTO delivery_dedup (account_id, event_id, accepted_at) VALUES (?, ?, ?)",
+      "INSERT INTO delivery_dedup (account_id, event_key, accepted_at) VALUES (?, ?, ?)",
     ).bind(account.accountId, `e${i}`, old),
   );
   await env.DB.batch(inserts);
@@ -87,7 +90,7 @@ it("くり返しの上限まで消したら、消し残しがありうること�
   await env.DB.batch(
     Array.from({ length: 5 }, (_, i) =>
       env.DB.prepare(
-        "INSERT INTO delivery_dedup (account_id, event_id, accepted_at) VALUES (?, ?, ?)",
+        "INSERT INTO delivery_dedup (account_id, event_key, accepted_at) VALUES (?, ?, ?)",
       ).bind(account.accountId, `capped-${i}`, old),
     ),
   );

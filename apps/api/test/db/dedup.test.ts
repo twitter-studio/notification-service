@@ -2,22 +2,30 @@ import { env } from "cloudflare:workers";
 import {
   beginEvent,
   completeEvent,
+  countAcceptedEventsSince,
   deleteAcceptedEventsBefore,
   EVENT_PROCESSING_LEASE_MS,
+  type EventStart,
   releaseEvent,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import { newAccount, testDb } from "./helpers";
 
+/** 受け付けたときのリースの ID。受け付けなかったらテストを失敗にする。 */
+function leaseOf(start: EventStart): string {
+  if (start.kind !== "accepted") throw new Error(`expected accepted, got ${start.kind}`);
+  return start.leaseId;
+}
+
 describe("イベントの重複の除去", () => {
-  it("同じアカウントの同じ event_id は 1 回だけ受け付け、送り終えたら済んだ重複、送る途中なら処理中と答える", async () => {
+  it("同じアカウントの同じイベントは 1 回だけ受け付け、送り終えたら済んだ重複、送る途中なら処理中と答える", async () => {
     const db = testDb();
     const alice = await newAccount(db);
-    const event = { accountId: alice.accountId, eventId: "e1" };
+    const event = { accountId: alice.accountId, eventKey: "e1" };
 
-    expect(await beginEvent(db, event)).toEqual({ kind: "accepted" });
+    const leaseId = leaseOf(await beginEvent(db, event));
     expect(await beginEvent(db, event)).toEqual({ kind: "in_progress" });
-    await completeEvent(db, event);
+    expect(await completeEvent(db, { ...event, leaseId })).toBe(true);
     expect(await beginEvent(db, event)).toEqual({ kind: "done" });
   });
 
@@ -27,22 +35,22 @@ describe("イベントの重複の除去", () => {
 
     const results = await Promise.all(
       Array.from({ length: 20 }, () =>
-        beginEvent(db, { accountId: alice.accountId, eventId: "e1" }),
+        beginEvent(db, { accountId: alice.accountId, eventKey: "e1" }),
       ),
     );
 
     expect(results.filter((result) => result.kind === "accepted")).toHaveLength(1);
   });
 
-  it("event_id が同じでも、アカウントが違えば別のイベント", async () => {
+  it("イベントが同じでも、アカウントが違えば別のイベント", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
 
-    expect((await beginEvent(db, { accountId: alice.accountId, eventId: "e1" })).kind).toBe(
+    expect((await beginEvent(db, { accountId: alice.accountId, eventKey: "e1" })).kind).toBe(
       "accepted",
     );
-    expect((await beginEvent(db, { accountId: bob.accountId, eventId: "e1" })).kind).toBe(
+    expect((await beginEvent(db, { accountId: bob.accountId, eventKey: "e1" })).kind).toBe(
       "accepted",
     );
   });
@@ -50,10 +58,10 @@ describe("イベントの重複の除去", () => {
   it("送れなかったイベントは、記録を消すと、やり直しを受け付ける", async () => {
     const db = testDb();
     const alice = await newAccount(db);
-    const event = { accountId: alice.accountId, eventId: "e1" };
-    await beginEvent(db, event);
+    const event = { accountId: alice.accountId, eventKey: "e1" };
+    const leaseId = leaseOf(await beginEvent(db, event));
 
-    expect(await releaseEvent(db, event)).toBe(true);
+    expect(await releaseEvent(db, { ...event, leaseId })).toBe(true);
 
     expect((await beginEvent(db, event)).kind).toBe("accepted");
   });
@@ -61,12 +69,12 @@ describe("イベントの重複の除去", () => {
   it("処理中のまま止まった記録は、期間を過ぎたやり直しで引き継ぐ。済んだ記録は引き継がない", async () => {
     const db = testDb();
     const alice = await newAccount(db);
-    const stuck = { accountId: alice.accountId, eventId: "stuck" };
-    const finished = { accountId: alice.accountId, eventId: "finished" };
+    const stuck = { accountId: alice.accountId, eventKey: "stuck" };
+    const finished = { accountId: alice.accountId, eventKey: "finished" };
     const start = new Date("2026-11-04T00:00:00.000Z");
     await beginEvent(db, stuck, start);
-    await beginEvent(db, finished, start);
-    await completeEvent(db, finished, start);
+    const finishedLease = leaseOf(await beginEvent(db, finished, start));
+    await completeEvent(db, { ...finished, leaseId: finishedLease }, start);
 
     const withinLease = new Date(start.getTime() + EVENT_PROCESSING_LEASE_MS);
     const afterLease = new Date(start.getTime() + EVENT_PROCESSING_LEASE_MS + 1);
@@ -77,28 +85,73 @@ describe("イベントの重複の除去", () => {
     expect((await beginEvent(db, finished, afterLease)).kind).toBe("done");
   });
 
+  it("引き継がれた後の前の要求は、記録を消すことも、済みにすることもできない", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const event = { accountId: alice.accountId, eventKey: "taken-over" };
+    const start = new Date("2026-11-04T00:00:00.000Z");
+    const first = leaseOf(await beginEvent(db, event, start));
+    const second = leaseOf(
+      await beginEvent(db, event, new Date(start.getTime() + EVENT_PROCESSING_LEASE_MS + 1)),
+    );
+
+    expect(await releaseEvent(db, { ...event, leaseId: first })).toBe(false);
+    expect(await completeEvent(db, { ...event, leaseId: first })).toBe(false);
+    expect((await beginEvent(db, event, start)).kind).toBe("in_progress");
+
+    // 引き継いだ要求が済みにしたら、前の要求は消せない (消すと、もう 1 回送ってしまう)。
+    expect(await completeEvent(db, { ...event, leaseId: second })).toBe(true);
+    expect(await releaseEvent(db, { ...event, leaseId: second })).toBe(false);
+    expect((await beginEvent(db, event)).kind).toBe("done");
+  });
+
   it("状態は processing と done だけ", async () => {
     const db = testDb();
     const alice = await newAccount(db);
 
     await expect(
       env.DB.prepare(
-        "INSERT INTO delivery_dedup (account_id, event_id, state) VALUES (?, 'e', 'other')",
+        "INSERT INTO delivery_dedup (account_id, event_key, state) VALUES (?, 'e', 'other')",
       )
         .bind(alice.accountId)
         .run(),
     ).rejects.toThrow(/CHECK/);
   });
 
+  it("アカウントが期間のあいだに受け付けた数を数える", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const bob = await newAccount(db);
+    const since = new Date("2026-11-03T00:00:00.000Z");
+    await beginEvent(db, { accountId: alice.accountId, eventKey: "before" }, since);
+    await beginEvent(
+      db,
+      { accountId: alice.accountId, eventKey: "after-1" },
+      new Date(since.getTime() + 1),
+    );
+    await beginEvent(
+      db,
+      { accountId: alice.accountId, eventKey: "after-2" },
+      new Date(since.getTime() + 2),
+    );
+    await beginEvent(
+      db,
+      { accountId: bob.accountId, eventKey: "after-1" },
+      new Date(since.getTime() + 1),
+    );
+
+    expect(await countAcceptedEventsSince(db, alice.accountId, since)).toBe(2);
+  });
+
   it("古い記録だけを消す", async () => {
     const db = testDb();
     const alice = await newAccount(db);
-    const old = { accountId: alice.accountId, eventId: "old" };
-    const recent = { accountId: alice.accountId, eventId: "new" };
-    await beginEvent(db, old, new Date("2026-10-01T00:00:00.000Z"));
-    await completeEvent(db, old);
-    await beginEvent(db, recent, new Date("2026-11-04T00:00:00.000Z"));
-    await completeEvent(db, recent);
+    const old = { accountId: alice.accountId, eventKey: "old" };
+    const recent = { accountId: alice.accountId, eventKey: "new" };
+    const oldLease = leaseOf(await beginEvent(db, old, new Date("2026-10-01T00:00:00.000Z")));
+    await completeEvent(db, { ...old, leaseId: oldLease });
+    const recentLease = leaseOf(await beginEvent(db, recent, new Date("2026-11-04T00:00:00.000Z")));
+    await completeEvent(db, { ...recent, leaseId: recentLease });
 
     expect(
       await deleteAcceptedEventsBefore(db, new Date("2026-11-01T00:00:00.000Z")),

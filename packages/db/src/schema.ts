@@ -158,7 +158,8 @@ export const deliveryDedup = sqliteTable(
     accountId: text("account_id")
       .notNull()
       .references(() => notificationAccounts.id),
-    eventId: text("event_id").notNull(),
+    // 送り手の event_id の SHA-256 (Base64URL)。event_id に X の ID などが入りうるので、生の値を DB に置かない (ADR-0009)。
+    eventKey: text("event_key").notNull(),
     acceptedAt: timestamp("accepted_at").notNull().default(now),
     // 送る処理の途中 (processing) か、済んだ (done) か。処理中のやり直しを、済んだ重複と分けて答えるため (ADR-0009)。
     state: text("state", { enum: ["processing", "done"] })
@@ -166,10 +167,14 @@ export const deliveryDedup = sqliteTable(
       .default("processing"),
     // 状態を最後に書いた時刻。処理中のまま止まった記録 (Worker が途中で落ちた) を、やり直しで引き継ぐのに使う。
     updatedAt: timestamp("updated_at").notNull().default(now),
+    // 受け付けと引き継ぎのたびに変える乱数の印。済みにする・消すのは、今の印を持つ要求だけにする (引き継がれた前の要求に触らせない)。
+    leaseId: text("lease_id"),
   },
   (t) => [
-    primaryKey({ columns: [t.accountId, t.eventId] }),
-    index("idx_delivery_dedup_accepted").on(t.acceptedAt),
+    primaryKey({ columns: [t.accountId, t.eventKey] }),
+    // アカウントごとの 1 日の受け付けの数を数える。定期の掃除 (受け付けた時刻で消す) は、表を読んで探す (索引を増やすと、
+    // 受け付けのたびの書き込みが増えるため)。
+    index("idx_delivery_dedup_account_accepted").on(t.accountId, t.acceptedAt),
     check("delivery_dedup_state", sql`${t.state} IN ('processing', 'done')`),
   ],
 );
