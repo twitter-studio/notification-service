@@ -130,8 +130,12 @@ export const ABANDONED_ACCOUNT_AFTER_MS = 180 * 24 * 60 * 60 * 1000;
 
 /**
  * 使われなくなったアカウントの条件 (`notification_accounts` の行について)。有効なアカウントで、`since` (引数 `since`) より後に、
- * アプリが使った有効なインストールも、使われた中継の資格情報もない。アプリを開かずに通知だけを受けている利用者は、中継の資格情報が
- * 使われるので含まない。
+ * 次のどれもない。
+ * - アプリが使ったインストール (`last_used_at`)。取り消したインストールは、取り消した時刻も使った時刻とみなす (取り消した鍵での
+ *   登録し直しを拒む 403 を、取り消してから期間のあいだ続けるため)。
+ * - 使われた、取り消していない中継の資格情報で、アカウントに送れる端末 (有効で、確かめたもの) があるもの。アプリを開かずに通知だけを
+ *   受けている利用者は消さない。送れる端末のないアカウントの資格情報 (鍵をなくした後の古い資格情報、漏れた資格情報) が使われても、
+ *   使ったとはみなさない。
  */
 function abandoned(since: string): string {
   return `
@@ -139,11 +143,17 @@ function abandoned(since: string): string {
     AND NOT EXISTS (
       SELECT 1 FROM installations
       WHERE installations.account_id = notification_accounts.id
-        AND installations.revoked_at IS NULL AND installations.last_used_at >= ${since})
-    AND NOT EXISTS (
-      SELECT 1 FROM relay_credentials
-      WHERE relay_credentials.account_id = notification_accounts.id
-        AND relay_credentials.revoked_at IS NULL AND relay_credentials.last_used_at >= ${since})`;
+        AND (installations.last_used_at >= ${since} OR installations.revoked_at >= ${since}))
+    AND NOT (
+      EXISTS (
+        SELECT 1 FROM relay_credentials
+        WHERE relay_credentials.account_id = notification_accounts.id
+          AND relay_credentials.revoked_at IS NULL AND relay_credentials.last_used_at >= ${since})
+      AND EXISTS (
+        SELECT 1 FROM devices
+        INNER JOIN installations ON installations.id = devices.installation_id
+        WHERE installations.account_id = notification_accounts.id AND installations.revoked_at IS NULL
+          AND devices.state = 'active' AND devices.verified_at IS NOT NULL))`;
 }
 
 /** 使われなくなったアカウントを、`afterRowid` より後ろ (rowid の順) から `limit` 件まで探す。 */

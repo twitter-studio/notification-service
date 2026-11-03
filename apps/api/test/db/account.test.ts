@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import {
   ABANDONED_ACCOUNT_AFTER_MS,
   beginEvent,
+  consumeDailyRelayQuota,
   createDb,
   createSession,
   deleteAbandonedAccount,
@@ -161,22 +162,135 @@ describe("使われなくなったアカウント", () => {
     expect(await listActiveDevices(db, neighbor.accountId)).toHaveLength(1);
   });
 
-  it("アプリか中継の資格情報が期間のうちに使われたアカウントは、消さない", async () => {
+  it("アプリか、送れる端末のある中継の資格情報が期間のうちに使われたアカウントは、消さない (使った時刻がちょうど境目でも)", async () => {
     const db = testDb();
     const usedApp = await newAccount(db);
+    const usedAppAtEdge = await newAccount(db);
+    await setInstallationUsed(usedAppAtEdge.installationId, since.getTime());
     const usedRelay = await newAccount(db);
+    await registerVerified(db, usedRelay, unique("token"));
     await setInstallationUsed(usedRelay.installationId, longAgo);
     await env.DB.prepare("UPDATE relay_credentials SET last_used_at = ? WHERE account_id = ?")
       .bind(since.getTime(), usedRelay.accountId)
       .run();
 
-    for (const account of [usedApp, usedRelay]) {
+    for (const account of [usedApp, usedAppAtEdge, usedRelay]) {
       expect(await deleteAbandonedAccount(db, { accountId: account.accountId, since }, now)).toBe(
         false,
       );
       expect(await stateOf(account.accountId)).toBe("active");
       expect(await count("installations", "account_id", account.accountId)).toBe(1);
     }
+  });
+
+  it("中継の資格情報が使われていても、送れる端末がなければ、使ったとはみなさない", async () => {
+    const db = testDb();
+    const noDevice = await newAccount(db);
+    const disabledDevice = await newAccount(db);
+    const device = await registerVerified(db, disabledDevice, unique("token"));
+    await disableDeviceByUser(db, { accountId: disabledDevice.accountId, deviceId: device });
+    for (const account of [noDevice, disabledDevice]) {
+      await setInstallationUsed(account.installationId, longAgo);
+      await env.DB.prepare("UPDATE relay_credentials SET last_used_at = ? WHERE account_id = ?")
+        .bind(now.getTime(), account.accountId)
+        .run();
+
+      expect(await deleteAbandonedAccount(db, { accountId: account.accountId, since }, now)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("取り消したインストールは、取り消した時刻から期間のあいだ残す", async () => {
+    const db = testDb();
+    const recentlyRevoked = await newAccount(db);
+    const longRevoked = await newAccount(db);
+    for (const [account, revokedAt] of [
+      [recentlyRevoked, since.getTime()],
+      [longRevoked, longAgo],
+    ] as const) {
+      await revokeInstallation(db, account, new Date(revokedAt));
+      await setInstallationUsed(account.installationId, longAgo);
+    }
+
+    expect(
+      await deleteAbandonedAccount(db, { accountId: recentlyRevoked.accountId, since }, now),
+    ).toBe(false);
+    expect(await deleteAbandonedAccount(db, { accountId: longRevoked.accountId, since }, now)).toBe(
+      true,
+    );
+  });
+
+  it("消したアカウントと止めたアカウントには触れない", async () => {
+    const db = testDb();
+    const deleted = await newAccount(db);
+    await deleteAccount(db, { accountId: deleted.accountId });
+    const disabled = await newAccount(db);
+    await setInstallationUsed(disabled.installationId, longAgo);
+    await env.DB.prepare("UPDATE notification_accounts SET state = 'disabled' WHERE id = ?")
+      .bind(disabled.accountId)
+      .run();
+
+    const found = await findAbandonedAccounts(db, { since }, 1000);
+    for (const account of [deleted, disabled]) {
+      expect(found.accountIds).not.toContain(account.accountId);
+      expect(await deleteAbandonedAccount(db, { accountId: account.accountId, since }, now)).toBe(
+        false,
+      );
+    }
+    expect(await stateOf(disabled.accountId)).toBe("disabled");
+    expect(await count("installations", "account_id", disabled.accountId)).toBe(1);
+  });
+
+  it("消すと、アカウントを指すすべての表 (受け付けの記録と 1 日の数を含む) から、そのアカウントの行がなくなる", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const device = await registerVerified(db, alice, unique("token"));
+    await beginEvent(db, { accountId: alice.accountId, eventKey: "e1" });
+    expect(await consumeDailyRelayQuota(db, { accountId: alice.accountId, limit: 10 })).toBe(true);
+    await createSession(db, {
+      ...alice,
+      challenge: { nonce: unique("nonce"), expiresAt: new Date(Date.now() + 60_000) },
+      session: { tokenHash: testHash(), expiresAt: new Date(Date.now() + 60_000) },
+    });
+    await env.DB.prepare("UPDATE relay_credentials SET last_used_at = NULL WHERE account_id = ?")
+      .bind(alice.accountId)
+      .run();
+    await setInstallationUsed(alice.installationId, longAgo);
+    // 端末が送れる状態でも、資格情報が使われていなければ、使ったとはみなさない。
+
+    expect(await deleteAbandonedAccount(db, { accountId: alice.accountId, since }, now)).toBe(true);
+
+    for (const table of [
+      "delivery_dedup",
+      "relay_usage",
+      "relay_credentials",
+      "sessions",
+      "installations",
+    ]) {
+      expect(await count(table, "account_id", alice.accountId), table).toBe(0);
+    }
+    expect(await count("devices", "id", device)).toBe(0);
+    expect(await count("device_verifications", "device_id", device)).toBe(0);
+  });
+
+  it("探すのは、rowid の続きから、区切りの件数まで", async () => {
+    const db = testDb();
+    const accounts = [await newAccount(db), await newAccount(db), await newAccount(db)];
+    for (const account of accounts) await setInstallationUsed(account.installationId, longAgo);
+    const ids = new Set(accounts.map((account) => account.accountId));
+    const seen: string[] = [];
+    let afterRowid = 0;
+    for (;;) {
+      const found = await findAbandonedAccounts(db, { since, afterRowid }, 1);
+      if (found.accountIds.length === 0) break;
+      expect(found.accountIds).toHaveLength(1);
+      expect(found.lastRowid).toBeGreaterThan(afterRowid);
+      seen.push(...found.accountIds.filter((id) => ids.has(id)));
+      afterRowid = found.lastRowid;
+    }
+
+    expect(new Set(seen)).toEqual(ids);
   });
 
   it("探してから消すまでに、アプリがセッションを作ったら、消さない", async () => {
