@@ -23,7 +23,8 @@ CREATE TABLE `devices` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `devices_installation_id_unique` ON `devices` (`installation_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `devices_token` ON `devices` (`token_fingerprint`,`apns_environment`,`topic`);--> statement-breakpoint
+CREATE UNIQUE INDEX `devices_verified_token` ON `devices` (`token_fingerprint`,`apns_environment`,`topic`) WHERE "devices"."verified_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_devices_token` ON `devices` (`token_fingerprint`,`apns_environment`,`topic`);--> statement-breakpoint
 CREATE TABLE `installations` (
 	`id` text PRIMARY KEY NOT NULL,
 	`account_id` text NOT NULL,

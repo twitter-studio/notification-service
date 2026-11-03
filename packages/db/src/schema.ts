@@ -86,7 +86,12 @@ export const devices = sqliteTable(
     updatedAt: timestamp("updated_at").notNull().default(now),
   },
   (t) => [
-    uniqueIndex("devices_token").on(t.tokenFingerprint, t.apnsEnvironment, t.topic),
+    // トークンを持っていることを確かめた行だけで、トークンを一意にする。確かめていない登録は何行あってもよく、どれにも送らない。
+    // 登録だけで一意にすると、トークンを知っている人の登録が、本物の端末の登録や確かめを妨げられるため (ADR-0004)。
+    uniqueIndex("devices_verified_token")
+      .on(t.tokenFingerprint, t.apnsEnvironment, t.topic)
+      .where(sql`${t.verifiedAt} IS NOT NULL`),
+    index("idx_devices_token").on(t.tokenFingerprint, t.apnsEnvironment, t.topic),
     check("devices_apns_environment", sql`${t.apnsEnvironment} IN ('sandbox', 'production')`),
     check("devices_state", sql`${t.state} IN ('active', 'disabled_by_user', 'invalidated')`),
   ],

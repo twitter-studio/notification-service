@@ -1,5 +1,9 @@
 import { env } from "cloudflare:workers";
-import { enrollInstallation, findActiveRelayCredential } from "@notification-service/db";
+import {
+  enrollInstallation,
+  findActiveRelayCredential,
+  isUniqueViolation,
+} from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import { testDb, unique } from "./helpers";
 
@@ -75,6 +79,6 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
 
     await expect(
       enrollInstallation(db, { publicKey, relaySecretHash: unique("hash") }),
-    ).rejects.toThrow();
+    ).rejects.toSatisfy((error) => isUniqueViolation(error, "installations.public_key"));
   });
 });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "855fbfce-7dfd-4f87-a6f8-fe7e154a342c",
+  "id": "269a849c-9922-48fa-9376-ced02effe61d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -132,10 +132,16 @@
           "columns": ["installation_id"],
           "isUnique": true
         },
-        "devices_token": {
-          "name": "devices_token",
+        "devices_verified_token": {
+          "name": "devices_verified_token",
           "columns": ["token_fingerprint", "apns_environment", "topic"],
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"devices\".\"verified_at\" IS NOT NULL"
+        },
+        "idx_devices_token": {
+          "name": "idx_devices_token",
+          "columns": ["token_fingerprint", "apns_environment", "topic"],
+          "isUnique": false
         }
       },
       "foreignKeys": {
