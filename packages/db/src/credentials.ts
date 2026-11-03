@@ -1,7 +1,9 @@
-import { and, eq, gt, isNull, or } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
 import type { Db } from "./db";
 import { notificationAccounts, relayCredentials } from "./schema";
-import { toDbTime } from "./time";
+
+/** 使った時刻を書き直す間隔。中継のたびに D1 へ書かないよう、これより前に書いたときだけ書き直す。 */
+export const LAST_USED_RESOLUTION_MS = 60 * 60 * 1000;
 
 /** 中継の資格情報を置く。DB に置くのはハッシュだけ (平文の秘密は呼ぶ側が 1 回だけ見せる。AUTH-002)。 */
 export async function createRelayCredential(
@@ -13,7 +15,7 @@ export async function createRelayCredential(
     id,
     accountId: input.accountId,
     secretHash: input.secretHash,
-    expiresAt: input.expiresAt === undefined ? null : toDbTime(input.expiresAt),
+    expiresAt: input.expiresAt ?? null,
   });
   return id;
 }
@@ -32,7 +34,7 @@ export async function findActiveRelayCredential(
       and(
         eq(relayCredentials.secretHash, secretHash),
         isNull(relayCredentials.revokedAt),
-        or(isNull(relayCredentials.expiresAt), gt(relayCredentials.expiresAt, toDbTime(now))),
+        or(isNull(relayCredentials.expiresAt), gt(relayCredentials.expiresAt, now)),
         eq(notificationAccounts.state, "active"),
       ),
     )
@@ -48,7 +50,7 @@ export async function revokeRelayCredential(
 ): Promise<boolean> {
   const rows = await db
     .update(relayCredentials)
-    .set({ revokedAt: toDbTime(now) })
+    .set({ revokedAt: now })
     .where(
       and(
         eq(relayCredentials.id, input.credentialId),
@@ -60,13 +62,24 @@ export async function revokeRelayCredential(
   return rows.length > 0;
 }
 
+/** 使った時刻を残す。取り消したもの、ほかのアカウントのものには書かない。`LAST_USED_RESOLUTION_MS` より前に書いたときだけ書き直す。 */
 export async function markRelayCredentialUsed(
   db: Db,
-  credentialId: string,
+  input: { accountId: string; credentialId: string },
   now = new Date(),
 ): Promise<void> {
   await db
     .update(relayCredentials)
-    .set({ lastUsedAt: toDbTime(now) })
-    .where(eq(relayCredentials.id, credentialId));
+    .set({ lastUsedAt: now })
+    .where(
+      and(
+        eq(relayCredentials.id, input.credentialId),
+        eq(relayCredentials.accountId, input.accountId),
+        isNull(relayCredentials.revokedAt),
+        or(
+          isNull(relayCredentials.lastUsedAt),
+          lt(relayCredentials.lastUsedAt, new Date(now.getTime() - LAST_USED_RESOLUTION_MS)),
+        ),
+      ),
+    );
 }

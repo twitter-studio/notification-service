@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ea96c4d8-ca99-47a4-b69d-ebdbc49357fa",
+  "id": "43a1a02b-93ba-4fd3-b40e-16f6176502df",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -23,11 +23,11 @@
         },
         "accepted_at": {
           "name": "accepted_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
         }
       },
       "indexes": {
@@ -37,7 +37,17 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "delivery_dedup_account_id_notification_accounts_id_fk": {
+          "name": "delivery_dedup_account_id_notification_accounts_id_fk",
+          "tableFrom": "delivery_dedup",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "delivery_dedup_account_id_event_id_pk": {
           "columns": ["account_id", "event_id"],
@@ -92,33 +102,33 @@
           "notNull": true,
           "autoincrement": false
         },
-        "enabled": {
-          "name": "enabled",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "updated_at": {
-          "name": "updated_at",
+        "state": {
+          "name": "state",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+          "default": "'active'"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
         }
       },
       "indexes": {
+        "devices_installation_id_unique": {
+          "name": "devices_installation_id_unique",
+          "columns": ["installation_id"],
+          "isUnique": true
+        },
         "devices_token": {
           "name": "devices_token",
           "columns": ["token_fingerprint", "apns_environment", "topic"],
           "isUnique": true
-        },
-        "idx_devices_installation": {
-          "name": "idx_devices_installation",
-          "columns": ["installation_id"],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -128,7 +138,7 @@
           "tableTo": "installations",
           "columnsFrom": ["installation_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -138,6 +148,10 @@
         "devices_apns_environment": {
           "name": "devices_apns_environment",
           "value": "\"devices\".\"apns_environment\" IN ('sandbox', 'production')"
+        },
+        "devices_state": {
+          "name": "devices_state",
+          "value": "\"devices\".\"state\" IN ('active', 'disabled_by_user', 'invalidated')"
         }
       }
     },
@@ -175,25 +189,36 @@
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
         },
         "revoked_at": {
           "name": "revoked_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         }
       },
       "indexes": {
+        "installations_public_key_unique": {
+          "name": "installations_public_key_unique",
+          "columns": ["public_key"],
+          "isUnique": true
+        },
         "idx_installations_account": {
           "name": "idx_installations_account",
           "columns": ["account_id"],
           "isUnique": false
+        },
+        "installations_one_active_per_account": {
+          "name": "installations_one_active_per_account",
+          "columns": ["account_id"],
+          "isUnique": true,
+          "where": "\"installations\".\"revoked_at\" IS NULL"
         }
       },
       "foreignKeys": {
@@ -203,7 +228,7 @@
           "tableTo": "notification_accounts",
           "columnsFrom": ["account_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -231,15 +256,15 @@
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
         },
         "deleted_at": {
           "name": "deleted_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -282,29 +307,29 @@
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
         },
         "expires_at": {
           "name": "expires_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "revoked_at": {
           "name": "revoked_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
         "last_used_at": {
           "name": "last_used_at",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -329,7 +354,7 @@
           "tableTo": "notification_accounts",
           "columnsFrom": ["account_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

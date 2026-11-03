@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import {
   createRelayCredential,
   findActiveRelayCredential,
+  isUniqueViolation,
+  LAST_USED_RESOLUTION_MS,
   markRelayCredentialUsed,
   revokeRelayCredential,
 } from "@notification-service/db";
@@ -9,6 +11,13 @@ import { describe, expect, it } from "vitest";
 import { newAccount, testDb, unique } from "./helpers";
 
 const now = new Date("2026-11-04T00:00:00.000Z");
+
+async function lastUsedAt(credentialId: string) {
+  const row = await env.DB.prepare("SELECT last_used_at FROM relay_credentials WHERE id = ?")
+    .bind(credentialId)
+    .first<{ last_used_at: number | null }>();
+  return row?.last_used_at;
+}
 
 describe("中継の資格情報", () => {
   it("ハッシュから、その資格情報のアカウントだけが決まる", async () => {
@@ -33,23 +42,18 @@ describe("中継の資格情報", () => {
 
     await expect(
       createRelayCredential(db, { accountId: alice.accountId, secretHash: hash }),
-    ).rejects.toThrow();
+    ).rejects.toSatisfy((error) => isUniqueViolation(error, "relay_credentials.secret_hash"));
   });
 
   it("期限を過ぎたものは使えない", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const hash = unique("hash");
-    await createRelayCredential(db, {
-      accountId: alice.accountId,
-      secretHash: hash,
-      expiresAt: new Date("2026-11-04T00:00:01.000Z"),
-    });
+    const expiresAt = new Date(now.getTime() + 1);
+    await createRelayCredential(db, { accountId: alice.accountId, secretHash: hash, expiresAt });
 
     expect(await findActiveRelayCredential(db, hash, now)).toBeDefined();
-    expect(
-      await findActiveRelayCredential(db, hash, new Date("2026-11-04T00:00:01.000Z")),
-    ).toBeUndefined();
+    expect(await findActiveRelayCredential(db, hash, expiresAt)).toBeUndefined();
   });
 
   it("取り消せるのは自分のアカウントのものだけで、取り消すと使えない", async () => {
@@ -84,32 +88,55 @@ describe("中継の資格情報", () => {
     ).toBe(false);
   });
 
-  it("止めたアカウントの資格情報は使えない", async () => {
+  it("止めたアカウントと、消したアカウントの資格情報は使えない", async () => {
     const db = testDb();
-    const alice = await newAccount(db);
-    const hash = unique("hash");
-    await createRelayCredential(db, { accountId: alice.accountId, secretHash: hash });
+    for (const state of ["disabled", "deleted"]) {
+      const account = await newAccount(db);
+      const hash = unique("hash");
+      await createRelayCredential(db, { accountId: account.accountId, secretHash: hash });
 
-    await env.DB.prepare("UPDATE notification_accounts SET state = 'disabled' WHERE id = ?")
-      .bind(alice.accountId)
-      .run();
+      await env.DB.prepare("UPDATE notification_accounts SET state = ? WHERE id = ?")
+        .bind(state, account.accountId)
+        .run();
 
-    expect(await findActiveRelayCredential(db, hash, now)).toBeUndefined();
+      expect(await findActiveRelayCredential(db, hash, now), state).toBeUndefined();
+    }
   });
 
-  it("使った時刻を残す", async () => {
+  it("使った時刻は、自分のアカウントの、取り消していないものにだけ、間をあけて残す", async () => {
     const db = testDb();
     const alice = await newAccount(db);
+    const bob = await newAccount(db);
     const credential = await createRelayCredential(db, {
       accountId: alice.accountId,
       secretHash: unique("hash"),
     });
 
-    await markRelayCredentialUsed(db, credential, now);
+    await markRelayCredentialUsed(db, { accountId: bob.accountId, credentialId: credential }, now);
+    expect(await lastUsedAt(credential)).toBeNull();
 
-    const row = await env.DB.prepare("SELECT last_used_at FROM relay_credentials WHERE id = ?")
-      .bind(credential)
-      .first<{ last_used_at: string }>();
-    expect(row?.last_used_at).toBe("2026-11-04T00:00:00.000Z");
+    await markRelayCredentialUsed(
+      db,
+      { accountId: alice.accountId, credentialId: credential },
+      now,
+    );
+    expect(await lastUsedAt(credential)).toBe(now.getTime());
+
+    const soon = new Date(now.getTime() + LAST_USED_RESOLUTION_MS - 1);
+    await markRelayCredentialUsed(
+      db,
+      { accountId: alice.accountId, credentialId: credential },
+      soon,
+    );
+    expect(await lastUsedAt(credential)).toBe(now.getTime());
+
+    await revokeRelayCredential(db, { accountId: alice.accountId, credentialId: credential }, now);
+    const later = new Date(now.getTime() + LAST_USED_RESOLUTION_MS + 1);
+    await markRelayCredentialUsed(
+      db,
+      { accountId: alice.accountId, credentialId: credential },
+      later,
+    );
+    expect(await lastUsedAt(credential)).toBe(now.getTime());
   });
 });
