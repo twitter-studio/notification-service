@@ -45,9 +45,11 @@
       "simple": { "limit": 30, "period": 60 }
     }
   ],
-  // 受け付けの記録の定期の掃除 (src/maintenance.ts)。1 日 1 回。Cron は UTC なので、日本時間の 3:17。
+  // 定期の掃除 (src/maintenance.ts、src/index.ts の CLEANUP_CRON と CLEANUPS)。どれも 1 日 1 回。Cron は UTC なので、日本時間の
+  // 3:17〜3:47。1 回の呼び出しで D1 に投げる問い合わせの数に上限があるので (無料のプランで 50)、発火する分ごとに掃除を分ける。
+  // 式を 1 つにまとめ、無料のプランの Cron の枠 (アカウントに 5 つ) を 1 つだけ使う。
   "triggers": {
-    "crons": ["17 18 * * *"]
+    "crons": ["17,27,37,47 18 * * *"]
   },
   "vars": {
     // 端末の登録で受け付ける topic (Bundle ID)。カンマ区切り (ADR-0008)。

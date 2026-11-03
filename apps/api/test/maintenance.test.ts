@@ -5,6 +5,7 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
+  ABANDONED_ACCOUNT_AFTER_MS,
   beginEvent,
   completeEvent,
   createDb,
@@ -14,10 +15,11 @@ import {
   enrollInstallation,
   registerDeviceToken,
 } from "@notification-service/db";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import worker from "../src/index";
 import {
   ACCEPTED_EVENT_RETENTION_MS,
+  cleanupAbandonedAccounts,
   cleanupAcceptedEvents,
   cleanupExpiredAuthRecords,
   cleanupStaleDevices,
@@ -25,6 +27,10 @@ import {
   REVOKED_RELAY_CREDENTIAL_RETENTION_MS,
 } from "../src/maintenance";
 import { CLOCK_SKEW_MS } from "../src/security/challenge";
+
+/** wrangler.jsonc の triggers.crons と同じ式。 */
+const CLEANUP_CRON = "17,27,37,47 18 * * *";
+
 import { testHash } from "./db/helpers";
 
 async function newAccount() {
@@ -38,7 +44,7 @@ async function newAccount() {
 async function runCleanup(scheduledTime: number) {
   const ctx = createExecutionContext();
   await worker.scheduled(
-    createScheduledController({ scheduledTime, cron: "17 18 * * *" }),
+    createScheduledController({ scheduledTime, cron: CLEANUP_CRON }),
     env,
     ctx,
   );
@@ -246,10 +252,115 @@ it("掃除が失敗しても、エラーの文 (D1 の文など) は投げ直さ
   } as unknown as Env;
 
   await worker.scheduled(
-    createScheduledController({ scheduledTime: Date.now(), cron: "17 18 * * *" }),
+    createScheduledController({
+      scheduledTime: Date.parse("2026-11-10T18:17:00.000Z"),
+      cron: CLEANUP_CRON,
+    }),
     broken,
     ctx,
   );
 
   await expect(waitOnExecutionContext(ctx)).rejects.toThrow(/^cleanup_failed$/);
+});
+
+it("定期の掃除で、使われなくなったアカウントを消し、最近使ったアカウントは残す", async () => {
+  const scheduledTime = Date.now();
+  const abandoned = await newAccount();
+  const active = await newAccount();
+  await env.DB.prepare("UPDATE installations SET last_used_at = ? WHERE id = ?")
+    .bind(scheduledTime - ABANDONED_ACCOUNT_AFTER_MS - 1, abandoned.installationId)
+    .run();
+
+  const result = await cleanupAbandonedAccounts(env, scheduledTime);
+
+  expect(result.deleted).toBeGreaterThanOrEqual(1);
+  const states = await env.DB.prepare(
+    "SELECT id, state FROM notification_accounts WHERE id IN (?, ?) ORDER BY id",
+  )
+    .bind(abandoned.accountId, active.accountId)
+    .all<{ id: string; state: string }>();
+  expect(Object.fromEntries(states.results.map((row) => [row.id, row.state]))).toEqual({
+    [abandoned.accountId]: "deleted",
+    [active.accountId]: "active",
+  });
+});
+
+it("Cron の発火した分ごとに、決まった掃除だけを動かす。知らない式と分は失敗にする", async () => {
+  const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+  for (const [minute, name] of [
+    [17, "accepted_events"],
+    [27, "auth_records"],
+    [37, "stale_devices"],
+    [47, "abandoned_accounts"],
+  ] as const) {
+    logs.mockClear();
+    const ctx = createExecutionContext();
+    await worker.scheduled(
+      createScheduledController({
+        scheduledTime: Date.UTC(2026, 10, 4, 18, minute),
+        cron: CLEANUP_CRON,
+      }),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    const logged = logs.mock.calls.map(
+      (call) => JSON.parse(String(call[0])) as { cleanup?: string },
+    );
+    expect(logged.map((entry) => entry.cleanup)).toEqual([name]);
+  }
+  logs.mockRestore();
+
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  for (const [cron, minute] of [
+    ["0 0 * * *", 17],
+    [CLEANUP_CRON, 18],
+  ] as const) {
+    await expect(
+      worker.scheduled(
+        createScheduledController({ scheduledTime: Date.UTC(2026, 10, 4, 18, minute), cron }),
+        env,
+        createExecutionContext(),
+      ),
+    ).rejects.toThrow(/unknown_cron/);
+  }
+  errors.mockRestore();
+});
+
+it("使われなくなったアカウントの掃除は、1 つのアカウントで失敗しても、次のアカウントへ進み、上限まで消したら知らせる", async () => {
+  const scheduledTime = Date.now();
+  const accounts = [await newAccount(), await newAccount(), await newAccount()];
+  for (const account of accounts) {
+    await env.DB.prepare("UPDATE installations SET last_used_at = ? WHERE id = ?")
+      .bind(scheduledTime - ABANDONED_ACCOUNT_AFTER_MS - 1, account.installationId)
+      .run();
+  }
+  let failures = 1;
+  const flaky = new Proxy(env.DB, {
+    get(target, property, receiver) {
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          if (failures-- > 0) throw new Error("D1_ERROR: injected failure");
+          return target.batch(statements);
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as D1Database;
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const result = await cleanupAbandonedAccounts({ ...env, DB: flaky }, scheduledTime, {
+    pageSize: 2,
+    maxAccounts: 2,
+  });
+
+  expect(result.capped).toBe(true);
+  expect(result.deleted).toBe(1);
+  expect(JSON.stringify(errors.mock.calls)).toContain("abandoned_account_cleanup_failed");
+  expect(JSON.stringify(errors.mock.calls)).not.toContain("injected failure");
+  errors.mockRestore();
+
+  const rest = await cleanupAbandonedAccounts(env, scheduledTime);
+  expect(rest.capped).toBe(false);
 });

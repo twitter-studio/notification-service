@@ -48,6 +48,9 @@ export const installations = sqliteTable(
       .default("pending"),
     createdAt: timestamp("created_at").notNull().default(now),
     revokedAt: timestamp("revoked_at"),
+    // 最後にアプリが使った時刻 (登録とセッションの作り直しで書く。1 日に 1 回まで)。使われなくなったアカウントを見つけるのに使う
+    // (notification-service#20)。
+    lastUsedAt: timestamp("last_used_at").notNull().default(now),
   },
   (t) => [
     check(

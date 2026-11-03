@@ -1,5 +1,6 @@
 import { createApp } from "./app";
 import {
+  cleanupAbandonedAccounts,
   cleanupAcceptedEvents,
   cleanupExpiredAuthRecords,
   cleanupStaleDevices,
@@ -7,31 +8,47 @@ import {
 
 const app = createApp();
 
+/** 定期の掃除の Cron の式 (wrangler.jsonc の triggers.crons と同じ)。1 つの式で、4 つの分に発火させる。 */
+const CLEANUP_CRON = "17,27,37,47 18 * * *";
+
+/**
+ * 発火した分ごとの掃除。1 回の呼び出しで D1 に投げる問い合わせの数に上限があるので (無料のプランで 50)、掃除ごとに呼び出しを分ける。
+ * 式を 1 つにまとめ、無料のプランの Cron の枠 (アカウントに 5 つ) を 1 つしか使わない。
+ */
+const CLEANUPS: Record<
+  number,
+  { name: string; run: (env: Env, time: number) => Promise<unknown> }
+> = {
+  17: { name: "accepted_events", run: cleanupAcceptedEvents },
+  27: { name: "auth_records", run: cleanupExpiredAuthRecords },
+  37: { name: "stale_devices", run: cleanupStaleDevices },
+  47: { name: "abandoned_accounts", run: cleanupAbandonedAccounts },
+};
+
 // 名前付きの export は置かない。Workers では、名前付きの export が別の入口 (entrypoint) として呼べてしまうため。
 export default {
   fetch: app.fetch,
   async scheduled(controller, env, ctx) {
+    const cleanup =
+      controller.cron === CLEANUP_CRON
+        ? CLEANUPS[new Date(controller.scheduledTime).getUTCMinutes()]
+        : undefined;
+    if (cleanup === undefined) {
+      // wrangler.jsonc と CLEANUPS がずれている。式は秘密ではないので、ログに出す。
+      console.error(JSON.stringify({ event: "unknown_cron", cron: controller.cron }));
+      throw new Error("unknown_cron");
+    }
     ctx.waitUntil(
-      Promise.all([
-        cleanupAcceptedEvents(env, controller.scheduledTime),
-        cleanupExpiredAuthRecords(env, controller.scheduledTime),
-        cleanupStaleDevices(env, controller.scheduledTime),
-      ]).then(
-        ([acceptedEvents, authRecords, staleDevices]) =>
-          console.log(
-            JSON.stringify({
-              event: "cleanup",
-              accepted_events: acceptedEvents,
-              auth_records: authRecords,
-              stale_devices: staleDevices,
-            }),
-          ),
+      cleanup.run(env, controller.scheduledTime).then(
+        (result) =>
+          console.log(JSON.stringify({ event: "cleanup", cleanup: cleanup.name, result })),
         (error: unknown) => {
           // エラーの文はログに出さない (app.ts の onError と同じ)。元のエラーを投げ直すと、ランタイムが文ごと記録するので、
           // 決まった文のエラーを投げて、Cron の実行を失敗として残す。
           console.error(
             JSON.stringify({
               event: "cleanup_failed",
+              cleanup: cleanup.name,
               name: error instanceof Error ? error.name : "unknown",
             }),
           );

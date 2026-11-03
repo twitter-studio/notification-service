@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d2f274f9-9df1-4244-924a-2396dfad52af",
+  "id": "7e1fde22-9f08-4a08-b111-0079536e11da",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -325,6 +325,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
         }
       },
       "indexes": {
