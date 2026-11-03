@@ -3,8 +3,9 @@ import { createDb, listActiveDevices } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import type { DeviceVerificationPush } from "../src/devices/verification";
-import { deviceMessage } from "../src/security/installation-key";
+import { deviceMessage, sessionMessage } from "../src/security/installation-key";
 import {
+  call,
   type DeviceKey,
   type Enrolled,
   enrollNewDevice,
@@ -13,6 +14,7 @@ import {
 } from "./helpers/api";
 import { newDeviceKey } from "./helpers/device-key";
 import { jsonHeaders } from "./helpers/http";
+import { expectLimitReached, outcomeOf } from "./helpers/rate-limit";
 
 const TOPIC = "com.twitter-studio.Tweetbot";
 
@@ -83,6 +85,7 @@ async function putDevice(
         apnsEnvironment,
         topic,
         apnsToken: input.apnsToken.toLowerCase(),
+        enabled: input.enabled,
       }),
     ));
   return request(
@@ -322,15 +325,175 @@ describe("端末の登録", () => {
     expect(await response.json()).toMatchObject({ verified: false, verification_sent: false });
   });
 
-  it("同じトークンの登録が多すぎると、アカウントが違っても 429", async () => {
-    const { app } = appWithPushes();
+  it("同じトークンへの確かめの push が多すぎると、アカウントが違っても送らないが、登録は通す", async () => {
+    const { app, pushes } = appWithPushes();
     const apnsToken = newApnsToken();
-    const statuses: number[] = [];
-    for (let attempt = 0; attempt < 6; attempt++) {
-      statuses.push((await putDevice(app, await enrollNewDevice(), { apnsToken })).status);
+    await expectLimitReached(10, async () => {
+      const response = await putDevice(app, await enrollNewDevice(), { apnsToken });
+      expect(response.status).toBe(200);
+      return (await response.json<DeviceResult>()).verification_sent ? "passed" : "limited";
+    });
+    expect(pushes.length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe("端末の登録の攻撃と制限", () => {
+  it("同じインストールで登録を並べて送っても、ほかの人のトークンを確かめたことにはできない", async () => {
+    const { app, pushes } = appWithPushes();
+    const victim = await enrollNewDevice();
+    const victimToken = newApnsToken();
+    await putDevice(app, victim, { apnsToken: victimToken });
+    await confirm(app, victim.enrolled, pushes[0]?.code ?? "");
+    const victimDevices = await activeDeviceIds(victim.enrolled);
+    const attacker = await enrollNewDevice();
+    const attackerToken = newApnsToken();
+
+    // 署名した 2 つの要求を先に作り、同じ tick で送る (端末の行の書き換えと、確かめの記録を置くのが入り交じるように)。
+    const signedPut = async (input: DeviceInput) => {
+      const challenge = await issueTestChallenge("device");
+      const signature = await attacker.device.sign(
+        deviceMessage(challenge, attacker.enrolled.installation_id, {
+          apnsEnvironment: "sandbox",
+          topic: TOPIC,
+          apnsToken: input.apnsToken,
+          enabled: input.enabled,
+        }),
+      );
+      return () => putDevice(app, attacker, input, { challenge, signature });
+    };
+    for (let round = 0; round < 6; round++) {
+      const requests = [
+        await signedPut({ apnsToken: attackerToken, enabled: false }),
+        await signedPut({ apnsToken: victimToken }),
+      ];
+      const sent = pushes.length;
+      await Promise.all(requests.map((send) => send()));
+      // 攻撃する側が受け取れるのは、自分の端末 (attackerToken) へ届いた code だけ。届いたらすぐに返す。
+      for (const push of pushes.slice(sent).filter((push) => push.apnsToken === attackerToken)) {
+        await confirm(app, attacker.enrolled, push.code);
+      }
+      expect(await activeDeviceIds(victim.enrolled), `round ${round}`).toEqual(victimDevices);
     }
 
-    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+    expect(await activeDeviceIds(victim.enrolled)).toEqual(victimDevices);
+    const row = await env.DB.prepare(
+      "SELECT token_fingerprint, verified_at FROM devices WHERE installation_id = ?",
+    )
+      .bind(attacker.enrolled.installation_id)
+      .first<{ token_fingerprint: string; verified_at: number | null }>();
+    const victimRow = await env.DB.prepare("SELECT token_fingerprint FROM devices WHERE id = ?")
+      .bind(victimDevices[0])
+      .first<{ token_fingerprint: string }>();
+    // 攻撃する側の行が被害者のトークンなら、確かめていない。
+    if (row?.token_fingerprint === victimRow?.token_fingerprint)
+      expect(row?.verified_at).toBeNull();
+  });
+
+  it("環境を入れ替えると、確かめ直すまで送らず、その環境へ push を送る", async () => {
+    const { app, pushes } = appWithPushes();
+    const owner = await enrollNewDevice();
+    const apnsToken = newApnsToken();
+    await putDevice(app, owner, { apnsToken });
+    await confirm(app, owner.enrolled, pushes[0]?.code ?? "");
+
+    const switched = await (
+      await putDevice(app, owner, { apnsToken, apnsEnvironment: "production" })
+    ).json<DeviceResult>();
+
+    expect(switched).toMatchObject({ verified: false, verification_sent: true });
+    expect(pushes[1]?.apnsEnvironment).toBe("production");
+    expect(await activeDeviceIds(owner.enrolled)).toEqual([]);
+  });
+
+  it("確かめの記録には、code の平文を置かない", async () => {
+    const { app, pushes } = appWithPushes();
+    const owner = await enrollNewDevice();
+    await putDevice(app, owner, { apnsToken: newApnsToken() });
+    const code = pushes[0]?.code ?? "";
+
+    const rows = await env.DB.prepare("SELECT * FROM device_verifications").all();
+
+    expect(JSON.stringify(rows.results)).not.toContain(code.slice(4));
+  });
+
+  it("確かめていない持ち主の code は、ほかの人が同じトークンを登録しても使える", async () => {
+    const { app, pushes } = appWithPushes();
+    const owner = await enrollNewDevice();
+    const other = await enrollNewDevice();
+    const apnsToken = newApnsToken();
+    await putDevice(app, owner, { apnsToken });
+    const ownerCode = pushes[0]?.code ?? "";
+
+    await putDevice(app, other, { apnsToken });
+
+    expect((await confirm(app, owner.enrolled, ownerCode)).status).toBe(200);
+  });
+
+  it("登録は、署名を確かめた後に、インストールごとに数える", async () => {
+    const { app } = appWithPushes();
+    const owner = await enrollNewDevice();
+    const apnsToken = newApnsToken();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await expectProblem(
+        await putDevice(app, owner, { apnsToken }, { signer: await newDeviceKey() }),
+        401,
+      );
+    }
+    await expectLimitReached(5, async () =>
+      outcomeOf((await putDevice(app, owner, { apnsToken })).status, 200),
+    );
+  });
+
+  it("確かめはセッションごとに数え、ほかのセッションで違う code を送り続けられても、持ち主は確かめられる", async () => {
+    const { app, pushes } = appWithPushes();
+    const owner = await enrollNewDevice();
+    await putDevice(app, owner, { apnsToken: newApnsToken() });
+    const leaked = owner.enrolled;
+    await expectLimitReached(5, async () =>
+      outcomeOf((await confirm(app, leaked, `tsv_${"A".repeat(43)}`)).status, 422),
+    );
+
+    const challenge = await issueTestChallenge("session");
+    const sessionResponse = await call("POST", "/v1/sessions", {
+      body: {
+        installation_id: owner.enrolled.installation_id,
+        challenge,
+        signature: await owner.device.sign(
+          sessionMessage(challenge, owner.enrolled.installation_id),
+        ),
+      },
+    });
+    const { session } = await sessionResponse.json<{ session: { token: string } }>();
+
+    expect(
+      (
+        await confirm(
+          app,
+          { ...owner.enrolled, session: { ...owner.enrolled.session, token: session.token } },
+          pushes[0]?.code ?? "",
+        )
+      ).status,
+    ).toBe(200);
+  });
+
+  it("enabled は署名の対象で、署名と違う enabled では登録できない", async () => {
+    const { app } = appWithPushes();
+    const owner = await enrollNewDevice();
+    const apnsToken = newApnsToken();
+    const challenge = await issueTestChallenge("device");
+    const signature = await owner.device.sign(
+      deviceMessage(challenge, owner.enrolled.installation_id, {
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
+        apnsToken,
+        enabled: true,
+      }),
+    );
+
+    await expectProblem(
+      await putDevice(app, owner, { apnsToken, enabled: false }, { challenge, signature }),
+      401,
+    );
   });
 });
 

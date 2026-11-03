@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import {
   type BearerTokenHash,
+  createDeviceVerification,
+  type DeviceTokenFingerprint,
   deleteAccount,
   deleteExpiredDeviceVerifications,
   disableDeviceByUser,
@@ -420,5 +422,31 @@ describe("端末の確かめの記録", () => {
         .first<{ count: number }>();
       expect(row?.count, table).toBe(0);
     }
+  });
+
+  it("記録は、送る先のトークンが今の端末のトークンで、まだ確かめていないときだけ置く", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const token = unique("token");
+    const device = deviceIdOf(await registerToken(db, alice, token));
+    const place = (
+      tokenFingerprint: DeviceTokenFingerprint,
+      apnsEnvironment: "sandbox" | "production" = "sandbox",
+    ) =>
+      createDeviceVerification(db, {
+        accountId: alice.accountId,
+        deviceId: device,
+        codeHash: testHash(),
+        expiresAt: new Date(Date.now() + 60_000),
+        tokenFingerprint,
+        apnsEnvironment,
+        topic: TOPIC,
+      });
+
+    expect(await place(fingerprintOf(unique("other")))).toBe(false);
+    expect(await place(fingerprintOf(token), "production")).toBe(false);
+    expect(await place(fingerprintOf(token))).toBe(true);
+    await verifyDevice(db, alice, device);
+    expect(await place(fingerprintOf(token))).toBe(false);
   });
 });

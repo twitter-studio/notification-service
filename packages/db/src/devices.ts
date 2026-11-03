@@ -106,19 +106,33 @@ export async function findInstallationDevice(
 }
 
 /**
- * 端末に、トークンを持っていることの確かめの code (のハッシュ) を置く。今の端末のトークン (指紋、環境、topic) を一緒に残す。
- * 前の code があれば置き換える。自分のアカウントの有効なインストールの端末でなければ false。
+ * 端末に、トークンを持っていることの確かめの code (のハッシュ) を置く。記録には、code を push で送るトークン (指紋、環境、
+ * topic) を残す。端末の行が今そのトークンで、まだ確かめていないときだけ置く (前の code は置き換える)。置けたら true で、
+ * 呼ぶ側はそのときだけ push を送る。自分のアカウントの有効なインストールの端末でなければ false。
+ *
+ * 行のトークンではなく、送る先のトークンを残す。行から写すと、同じインストールの登録が並んだとき、ほかのトークン (B) の行の値で
+ * 記録を作り、その code を自分のトークン (A) へ送ってしまい、B を確かめたことにできる (トークン B を奪える) ため。
  */
 export async function createDeviceVerification(
   db: Db,
-  input: { accountId: string; deviceId: string; codeHash: BearerTokenHash; expiresAt: Date },
+  input: {
+    accountId: string;
+    deviceId: string;
+    codeHash: BearerTokenHash;
+    expiresAt: Date;
+    tokenFingerprint: DeviceTokenFingerprint;
+    apnsEnvironment: ApnsEnvironment;
+    topic: string;
+  },
   now = new Date(),
 ): Promise<boolean> {
   const row = await db.$client
     .prepare(`
       INSERT INTO device_verifications (device_id, code_hash, token_fingerprint, apns_environment, topic, expires_at, created_at)
-      SELECT devices.id, ?3, devices.token_fingerprint, devices.apns_environment, devices.topic, ?4, ?5 FROM devices
+      SELECT devices.id, ?3, ?6, ?7, ?8, ?4, ?5 FROM devices
       WHERE devices.id = ?2 AND devices.installation_id IN (${ACTIVE_INSTALLATIONS_OF_ACCOUNT})
+        AND devices.token_fingerprint = ?6 AND devices.apns_environment = ?7 AND devices.topic = ?8
+        AND devices.verified_at IS NULL
       ON CONFLICT (device_id) DO UPDATE SET
         code_hash = excluded.code_hash,
         token_fingerprint = excluded.token_fingerprint,
@@ -127,7 +141,16 @@ export async function createDeviceVerification(
         expires_at = excluded.expires_at,
         created_at = excluded.created_at
       RETURNING device_id`)
-    .bind(input.accountId, input.deviceId, input.codeHash, input.expiresAt.getTime(), now.getTime())
+    .bind(
+      input.accountId,
+      input.deviceId,
+      input.codeHash,
+      input.expiresAt.getTime(),
+      now.getTime(),
+      input.tokenFingerprint,
+      input.apnsEnvironment,
+      input.topic,
+    )
     .first<{ device_id: string }>();
   return row !== null;
 }

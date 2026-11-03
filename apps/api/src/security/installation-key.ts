@@ -29,13 +29,18 @@ export function sessionMessage(challenge: string, installationId: string): strin
 }
 
 /**
- * 端末 (APNs のトークン) の登録で署名する文。チャレンジ、インストール、環境、topic、トークン (小文字の 16 進数) を結び付け、
- * セッションだけで、ほかのトークンや環境に書き換えさせない。
+ * 端末 (APNs のトークン) の登録で署名する文。チャレンジ、インストール、環境、topic、トークン (小文字の 16 進数)、通知を
+ * 受け取るか (`true`、`false`、省いたら空) を結び付け、セッションだけで、ほかのトークンや環境、設定に書き換えさせない。
  */
 export function deviceMessage(
   challenge: string,
   installationId: string,
-  device: { apnsEnvironment: string; topic: string; apnsToken: string },
+  device: {
+    apnsEnvironment: string;
+    topic: string;
+    apnsToken: string;
+    enabled?: boolean | undefined;
+  },
 ): string {
   return [
     "twitter-studio/device/v1",
@@ -44,6 +49,7 @@ export function deviceMessage(
     device.apnsEnvironment,
     device.topic,
     device.apnsToken,
+    device.enabled === undefined ? "" : String(device.enabled),
   ].join("\n");
 }
 

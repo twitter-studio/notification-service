@@ -75,19 +75,30 @@ export async function registerToken(
   });
 }
 
-/** 端末に確かめの記録を置き、その code のハッシュを返す (push で code を送ったところまで)。置けなければ undefined。 */
+/**
+ * 端末の今のトークンへ code を送ったものとして確かめの記録を置き、その code のハッシュを返す。置けなければ undefined。
+ * 送る先のトークンを、端末の行から読む (API は要求のトークンを使う。ここでは DB の関数だけを確かめる)。
+ */
 export async function issueVerification(
   db: Db,
   owner: Owner,
   deviceId: string,
   expiresAt = new Date(Date.now() + 10 * 60 * 1000),
 ): Promise<BearerTokenHash | undefined> {
+  const row = await env.DB.prepare(
+    "SELECT token_fingerprint, apns_environment, topic FROM devices WHERE id = ?",
+  )
+    .bind(deviceId)
+    .first<{ token_fingerprint: string; apns_environment: ApnsEnvironment; topic: string }>();
   const codeHash = testHash();
   const created = await createDeviceVerification(db, {
     accountId: owner.accountId,
     deviceId,
     codeHash,
     expiresAt,
+    tokenFingerprint: (row?.token_fingerprint ?? "f1.none") as DeviceTokenFingerprint,
+    apnsEnvironment: row?.apns_environment ?? "sandbox",
+    topic: row?.topic ?? TOPIC,
   });
   return created ? codeHash : undefined;
 }

@@ -4,10 +4,22 @@ import { ProblemError } from "../problem";
 // 数は Cloudflare の場所ごとのおおよその数で、少し超えることがある。総当たりと D1 の書き込みの使い切りを遅らせるためのもので、
 // 正確な上限が要るもの (課金など) には使わない。
 
+/** 制限の中なら true (数える)。超えたときに 429 にせず、処理の一部だけをやめるときに使う。 */
+export async function isWithinRateLimit(limiter: RateLimit, key: string): Promise<boolean> {
+  return (await limiter.limit({ key })).success;
+}
+
+/** 秘密に近い値 (トークンの指紋など) を数える単位にするときの短いハッシュ。値そのものを、制限の仕組みに渡さない。 */
+export async function rateLimitKeyOf(value: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+  );
+  return Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /** 制限を超えたら 429 を投げる。`key` は、数える単位 (IP、インストール) と用途を含めた文字列。 */
 export async function enforceRateLimit(limiter: RateLimit, key: string): Promise<void> {
-  const { success } = await limiter.limit({ key });
-  if (!success) {
+  if (!(await isWithinRateLimit(limiter, key))) {
     // 数える期間 (wrangler.jsonc の period) は 60 秒。
     throw new ProblemError(429, "Too Many Requests", undefined, { "Retry-After": "60" });
   }

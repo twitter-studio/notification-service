@@ -27,7 +27,7 @@ import {
   parseInstallationPublicKey,
   verifyInstallationSignature,
 } from "../security/installation-key";
-import { enforceRateLimit } from "../security/rate-limit";
+import { enforceRateLimit, isWithinRateLimit, rateLimitKeyOf } from "../security/rate-limit";
 import { commonProblems, problemResponse, sessionProblems } from "./openapi";
 
 // 端末 (APNs のトークン) の登録、入れ替え、止める、トークンを持っていることの確かめ (設計書 §4、API-002、ADR-0008)。
@@ -177,7 +177,12 @@ export function registerDevices(
     }
     const db = createDb(c.env.DB);
     const installation = await findActiveInstallation(db, session.installationId);
-    const device = { apnsEnvironment: body.apns_environment, topic: body.topic, apnsToken };
+    const device = {
+      apnsEnvironment: body.apns_environment,
+      topic: body.topic,
+      apnsToken,
+      enabled: body.enabled,
+    };
     const verified =
       installation !== undefined &&
       installation.accountId === session.accountId &&
@@ -195,9 +200,6 @@ export function registerDevices(
       apnsEnvironment: body.apns_environment,
       topic: body.topic,
     });
-    // 確かめの push は、トークンを知っていればどのアカウントからでも送らせられるので、トークンごとにも数える。
-    await enforceRateLimit(c.env.INSTALLATION_RATE_LIMITER, `device-token:${sealed.fingerprint}`);
-
     let registration: Awaited<ReturnType<typeof registerDeviceToken>>;
     try {
       registration = await registerDeviceToken(
@@ -224,31 +226,39 @@ export function registerDevices(
     if (body.enabled === true) await enableDeviceByUser(db, owner, now);
     if (body.enabled === false) await disableDeviceByUser(db, owner, now);
 
+    // 確かめの記録は、push を送るトークン (この要求の値) で置く。端末の行がもうほかのトークンに変わっていたら置かず、送らない。
+    const code = newBearerToken("verification");
+    const created = await createDeviceVerification(
+      db,
+      {
+        ...owner,
+        codeHash: await hashBearerToken(code),
+        expiresAt: new Date(now.getTime() + DEVICE_VERIFICATION_TTL_MS),
+        tokenFingerprint: sealed.fingerprint,
+        apnsEnvironment: body.apns_environment,
+        topic: body.topic,
+      },
+      now,
+    );
+    // 確かめの push は、トークンを知っていればどのアカウントからでも送らせられるので、送るときだけトークンごとにも数える。
+    // 超えたら送らず、登録は通す (ほかの人に、持ち主の登録を 429 にさせない)。
+    const verificationSent =
+      created &&
+      (await isWithinRateLimit(
+        c.env.TOKEN_RATE_LIMITER,
+        `device-token:${await rateLimitKeyOf(sealed.fingerprint)}`,
+      )) &&
+      (await sendVerification({
+        deviceId: registration.deviceId,
+        apnsToken,
+        apnsEnvironment: body.apns_environment,
+        topic: body.topic,
+        code,
+      }));
+
     const current = await findInstallationDevice(db, session);
     if (current === undefined)
       throw new ProblemError(401, "Unauthorized", "The installation is not active.");
-    let verificationSent = false;
-    if (!current.verified) {
-      const code = newBearerToken("verification");
-      const created = await createDeviceVerification(
-        db,
-        {
-          ...owner,
-          codeHash: await hashBearerToken(code),
-          expiresAt: new Date(now.getTime() + DEVICE_VERIFICATION_TTL_MS),
-        },
-        now,
-      );
-      if (created) {
-        verificationSent = await sendVerification({
-          deviceId: current.id,
-          apnsToken,
-          apnsEnvironment: body.apns_environment,
-          topic: body.topic,
-          code,
-        });
-      }
-    }
     return c.json(
       {
         device_id: current.id,
@@ -265,9 +275,10 @@ export function registerDevices(
     const { id } = c.req.valid("param");
     if (id !== session.installationId) throw new ProblemError(404, "Not Found");
     const { code } = c.req.valid("json");
+    // セッションごとに数える。漏れたセッションで違う code を送り続けても、持ち主のほかのセッションの確かめを止めさせない。
     await enforceRateLimit(
       c.env.INSTALLATION_RATE_LIMITER,
-      `device-verification:${session.installationId}`,
+      `device-verification:${session.sessionId}`,
     );
     const db = createDb(c.env.DB);
     const device = await findInstallationDevice(db, session);
