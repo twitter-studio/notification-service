@@ -1,14 +1,15 @@
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { Db } from "./db";
 import { devices, installations, notificationAccounts } from "./schema";
+import type { DeviceTokenCiphertext, DeviceTokenFingerprint } from "./types";
 
 export type ApnsEnvironment = "sandbox" | "production";
 
 export type DeviceRegistration = {
   accountId: string;
   installationId: string;
-  apnsTokenCiphertext: string;
-  tokenFingerprint: string;
+  apnsTokenCiphertext: DeviceTokenCiphertext;
+  tokenFingerprint: DeviceTokenFingerprint;
   apnsEnvironment: ApnsEnvironment;
   topic: string;
 };
@@ -20,8 +21,9 @@ export type DeviceRegistrationResult =
 
 export type ActiveDevice = {
   id: string;
-  apnsTokenCiphertext: string;
-  tokenFingerprint: string;
+  installationId: string;
+  apnsTokenCiphertext: DeviceTokenCiphertext;
+  tokenFingerprint: DeviceTokenFingerprint;
   apnsEnvironment: ApnsEnvironment;
   topic: string;
 };
@@ -85,7 +87,7 @@ export async function markDeviceVerified(
   input: {
     accountId: string;
     deviceId: string;
-    tokenFingerprint: string;
+    tokenFingerprint: DeviceTokenFingerprint;
     apnsEnvironment: ApnsEnvironment;
     topic: string;
   },
@@ -182,7 +184,7 @@ export async function enableDeviceByUser(
  */
 export async function invalidateDevice(
   db: Db,
-  input: { deviceId: string; tokenFingerprint: string },
+  input: { deviceId: string; tokenFingerprint: DeviceTokenFingerprint },
   now = new Date(),
 ): Promise<boolean> {
   const rows = await db
@@ -201,9 +203,10 @@ export async function invalidateDevice(
 
 /** 通知を送る先: 有効なアカウントの、取り消していないインストールの、有効で、トークンを持っていることを確かめた端末。 */
 export async function listActiveDevices(db: Db, accountId: string): Promise<ActiveDevice[]> {
-  return db
+  const rows = await db
     .select({
       id: devices.id,
+      installationId: devices.installationId,
       apnsTokenCiphertext: devices.apnsTokenCiphertext,
       tokenFingerprint: devices.tokenFingerprint,
       apnsEnvironment: devices.apnsEnvironment,
@@ -221,4 +224,10 @@ export async function listActiveDevices(db: Db, accountId: string): Promise<Acti
         isNotNull(devices.verifiedAt),
       ),
     );
+  // DB の列は、DB の CHECK で形を確かめた暗号文と指紋だけが入る (schema.ts)。
+  return rows.map((row) => ({
+    ...row,
+    apnsTokenCiphertext: row.apnsTokenCiphertext as DeviceTokenCiphertext,
+    tokenFingerprint: row.tokenFingerprint as DeviceTokenFingerprint,
+  }));
 }

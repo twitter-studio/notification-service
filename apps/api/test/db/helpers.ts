@@ -4,6 +4,8 @@ import {
   createDb,
   type Db,
   type DeviceRegistrationResult,
+  type DeviceTokenCiphertext,
+  type DeviceTokenFingerprint,
   enrollInstallation,
   markDeviceVerified,
   registerDeviceToken,
@@ -29,8 +31,13 @@ export async function newAccount(db: Db) {
   });
 }
 
-export function fingerprintOf(token: string): string {
-  return `fingerprint-of-${token}`;
+/** DB のテスト用の指紋と暗号文。DB の CHECK に合う形にする。本物の暗号化は test/security で確かめる。 */
+export function fingerprintOf(token: string): DeviceTokenFingerprint {
+  return `f1.fingerprint-of-${token}` as DeviceTokenFingerprint;
+}
+
+function ciphertextOf(token: string): DeviceTokenCiphertext {
+  return `v1.test.ciphertext-of-${token}` as DeviceTokenCiphertext;
 }
 
 export async function registerToken(
@@ -42,7 +49,7 @@ export async function registerToken(
   return registerDeviceToken(db, {
     accountId: owner.accountId,
     installationId: owner.installationId,
-    apnsTokenCiphertext: `ciphertext-of-${token}`,
+    apnsTokenCiphertext: ciphertextOf(token),
     tokenFingerprint: fingerprintOf(token),
     apnsEnvironment,
     topic: TOPIC,

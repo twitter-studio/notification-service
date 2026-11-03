@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "269a849c-9922-48fa-9376-ced02effe61d",
+  "id": "123e15ee-2c7b-4f85-a1f2-40dd16bbc410",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -161,6 +161,14 @@
         "devices_apns_environment": {
           "name": "devices_apns_environment",
           "value": "\"devices\".\"apns_environment\" IN ('sandbox', 'production')"
+        },
+        "devices_apns_token_ciphertext": {
+          "name": "devices_apns_token_ciphertext",
+          "value": "\"devices\".\"apns_token_ciphertext\" GLOB 'v[0-9]*.*'"
+        },
+        "devices_token_fingerprint": {
+          "name": "devices_token_fingerprint",
+          "value": "\"devices\".\"token_fingerprint\" GLOB 'f[0-9]*.*'"
         },
         "devices_state": {
           "name": "devices_state",

@@ -12,7 +12,19 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
-          bindings: { TEST_MIGRATIONS: migrations },
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            // テストだけの鍵 (本物の秘密ではない)。本物の鍵は Cloudflare の秘密に置く (ADR-0005)。
+            DEVICE_TOKEN_KEYS: JSON.stringify({
+              current: "test-1",
+              keys: { "test-1": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" },
+            }),
+            DEVICE_TOKEN_FINGERPRINT_KEY: "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+            DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+              fingerprint: "ded9776b92b0a8e2",
+              keys: { "test-1": "8242446efc984a7c" },
+            }),
+          },
           // migration をデータの入った D1 に当てるテストのための、テストだけの D1。
           d1Databases: { MIGRATION_DB: "migration-test" },
         },
