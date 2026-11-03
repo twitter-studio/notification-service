@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main への push の run は止めない (続けてマージしたとき、各 commit の結果を残すため)。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -35,7 +36,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # mise.toml の node とそろえる。
-          node-version: 24.22.1
+          node-version: 26.13.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint

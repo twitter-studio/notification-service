@@ -4,14 +4,14 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "typecheck": "wrangler types --check && tsc -p tsconfig.json",
-    "types": "wrangler types",
+    "typecheck": "wrangler types --check && tsc -p tsconfig.json && tsc -p test/tsconfig.json",
+    "types": "wrangler types --env-file .dev.vars.example",
     "test": "vitest run",
     "build": "wrangler deploy --dry-run --outdir dist"
   },
   "dependencies": {
     "@hono/zod-openapi": "1.6.3",
-    "hono": "4.13.16",
+    "hono": "4.13.14",
     "zod": "4.6.7"
   },
   "devDependencies": {

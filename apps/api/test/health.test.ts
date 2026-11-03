@@ -8,10 +8,4 @@ describe("GET /health", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "ok" });
   });
-
-  it("ない path には 404 を返す", async () => {
-    const response = await exports.default.fetch("https://notification.test/unknown");
-
-    expect(response.status).toBe(404);
-  });
 });

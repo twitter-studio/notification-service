@@ -13,3 +13,9 @@ updates:
     # 公開されたばかりの版は、乗っ取られた版だった場合に気づく間がないので、数日待つ。
     cooldown:
       default-days: 3
+    # wrangler と Cloudflare のテストのプラグインは、同じ頃の workerd を前提に版がそろっているので、1 つの PR で上げる (ADR-0002)。
+    groups:
+      cloudflare:
+        patterns:
+          - wrangler
+          - "@cloudflare/*"

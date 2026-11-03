@@ -6,3 +6,9 @@ dist/
 !.dev.vars.example
 coverage/
 *.log
+# wrangler は .dev.vars がないと .env 系を手元の秘密として読む。
+.env
+.env.*
+!.env.example
+# APNs の署名の鍵。
+*.p8

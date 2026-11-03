@@ -1,3 +1,4 @@
 [tools]
-node = "24.22.1"
-pnpm = "11.16.0"
+# ci.yml の node-version とそろえる。
+node = "26.13.0"
+pnpm = "11.28.10"

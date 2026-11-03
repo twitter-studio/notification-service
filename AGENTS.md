@@ -88,15 +88,19 @@ Node.js と pnpm は `mise.toml` で固定している (`mise exec -- pnpm …`�
 ```sh
 pnpm install --frozen-lockfile
 pnpm lint        # Biome (ADR-0001)
-pnpm typecheck   # wrangler types --check と tsc
+pnpm typecheck   # wrangler types --check と tsc (本番のコードとテストで tsconfig を分けている)
 pnpm test        # Vitest。workerd の上で動かす (ADR-0002)
 pnpm build       # wrangler deploy --dry-run。デプロイはしない
 ```
 
 ### 決まり
 
-- 依存は、公開から数日たった版を選ぶ。pnpm 11 は公開されたばかりの版を既定で避けるので、例外 (`minimumReleaseAgeExclude`) を足さない。インストール時のスクリプトは `pnpm-workspace.yaml` の `allowBuilds` に挙げたものだけを許す。
-- `wrangler.jsonc` を変えたら `wrangler types` で型を作り直す (CI が `--check` で調べる)。`compatibility_date` は、`@cloudflare/vitest-plugin` に付く workerd が対応する日付より新しくしない。
-- 公開の API は `@hono/zod-openapi` のスキーマで先に決め、生成したものを手で直さない。
-- `wrangler deploy` を `--dry-run` なしで動かさない (デプロイはオーナーの承認を得てから)。Cloudflare の資格情報と秘密は、このリポジトリに置かない。手元の秘密は `.dev.vars` (コミットしない) に置く。
+- 依存は、公開から 3 日たった版を選ぶ (`pnpm-workspace.yaml` の `minimumReleaseAge`。Dependabot の cooldown とそろえている)。例外 (`minimumReleaseAgeExclude`) を足さない。インストール時のスクリプトは動かさない (`allowBuilds` で false)。要るものが出たら、理由と一緒に true にする。
+- 手元の秘密は `apps/api/.dev.vars` (コミットしない) に置き、名前だけを `apps/api/.dev.vars.example` に書く。型 (`worker-configuration.d.ts`) は `.dev.vars.example` から作る (`pnpm --filter @notification-service/api types`)。`wrangler.jsonc` か `.dev.vars.example` を変えたら作り直す (CI が `--check` で調べる)。
+- wrangler と `@cloudflare/*` は、Dependabot が 1 つの PR にまとめる。その PR は型の版が変わるので `typecheck` で落ちる。PR のブランチで `types` を動かし、型を作り直して push する。`compatibility_date` は、`@cloudflare/vitest-plugin` に付く workerd が対応する日付より新しくしない (ADR-0002)。
+- Node.js の版は `mise.toml` と `.github/workflows/ci.yml` の 2 か所にある。そろえて上げる (ADR-0003)。
+- 公開の API は `@hono/zod-openapi` のスキーマで先に決め、生成したものを手で直さない。エラーの応答は `src/problem.ts` の problem+json にし、`request_id` はサーバーで作る。エラーの文は応答にもログにも出さない。
+- `observability` のログにはリクエストのヘッダーも残る。秘密を独自のヘッダーで受けるときは、ログに残らないかを確かめる。
+- `wrangler deploy` を `--dry-run` なしで動かさない (デプロイはオーナーの承認を得てから)。Cloudflare の資格情報と秘密は、このリポジトリに置かない。
 - `GET /health` などの公開の応答に、版、設定、秘密の有無を出さない。
+- テストは `apps/api/test/` に置く (設計書 §7 の `tests/{unit,…}` は、workspace に合わせてパッケージの中に置いた)。
