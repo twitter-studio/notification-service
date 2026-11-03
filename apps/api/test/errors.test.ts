@@ -1,6 +1,6 @@
 import { exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { createApp } from "../src/app";
+import { createApp, MAX_BODY_BYTES } from "../src/app";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -16,6 +16,38 @@ describe("エラーの応答", () => {
     expect(body).toMatchObject({ type: "about:blank", title: "Not Found", status: 404 });
     expect(body.request_id).toMatch(UUID);
     expect(response.headers.get("X-Request-Id")).toBe(body.request_id);
+  });
+
+  it("JSON として読めない本文は 400、application/json でない本文は 415 の problem+json にする", async () => {
+    for (const [headers, body, status] of [
+      [{ "Content-Type": "application/json" }, "{", 400],
+      [{ "Content-Type": "text/plain" }, JSON.stringify({ purpose: "enroll" }), 415],
+    ] as const) {
+      const response = await exports.default.fetch(
+        "https://notification.test/v1/enrollments/challenge",
+        { method: "POST", headers, body },
+      );
+
+      expect(response.status).toBe(status);
+      expect(response.headers.get("Content-Type")).toBe("application/problem+json");
+      expect(await response.json()).toMatchObject({ status });
+    }
+  });
+
+  it("/v1 の応答は、本文が大きすぎるときも含め、途中の cache に残させない", async () => {
+    const notFound = await exports.default.fetch("https://notification.test/v1/unknown");
+    const tooLarge = await exports.default.fetch(
+      "https://notification.test/v1/enrollments/challenge",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ padding: "x".repeat(MAX_BODY_BYTES) }),
+      },
+    );
+
+    expect(notFound.headers.get("Cache-Control")).toBe("no-store");
+    expect(tooLarge.status).toBe(413);
+    expect(tooLarge.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("思わぬエラーは 500 の problem+json にし、エラーの文を応答にもログにも出さない", async () => {

@@ -24,10 +24,16 @@ export type Owner = { accountId: string; installationId: string };
 
 export const TOPIC = "com.twitter-studio.Tweetbot";
 
+/** 署名に使ったものとして記録するチャレンジ (DB のテストでは、署名は確かめない)。 */
+export function consumedChallenge() {
+  return { nonce: unique("nonce"), expiresAt: new Date(Date.now() + 5 * 60 * 1000) };
+}
+
 export async function newAccount(db: Db) {
   return enrollInstallation(db, {
     publicKey: unique("public-key"),
     relaySecretHash: unique("secret-hash"),
+    challenge: consumedChallenge(),
   });
 }
 
