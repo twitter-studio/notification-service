@@ -20,6 +20,8 @@ export function testDb(): Db {
 
 export type Owner = { accountId: string; installationId: string };
 
+export const TOPIC = "com.twitter-studio.Tweetbot";
+
 export async function newAccount(db: Db) {
   return enrollInstallation(db, {
     publicKey: unique("public-key"),
@@ -43,7 +45,7 @@ export async function registerToken(
     apnsTokenCiphertext: `ciphertext-of-${token}`,
     tokenFingerprint: fingerprintOf(token),
     apnsEnvironment,
-    topic: "com.twitter-studio.Tweetbot",
+    topic: TOPIC,
   });
 }
 
@@ -61,6 +63,8 @@ export async function registerVerified(db: Db, owner: Owner, token: string): Pro
       accountId: owner.accountId,
       deviceId,
       tokenFingerprint: fingerprintOf(token),
+      apnsEnvironment: "sandbox",
+      topic: TOPIC,
     }))
   ) {
     throw new Error("markDeviceVerified failed");

@@ -82,12 +82,20 @@ export async function registerDeviceToken(
  */
 export async function markDeviceVerified(
   db: Db,
-  input: { accountId: string; deviceId: string; tokenFingerprint: string },
+  input: {
+    accountId: string;
+    deviceId: string;
+    tokenFingerprint: string;
+    apnsEnvironment: ApnsEnvironment;
+    topic: string;
+  },
   now = new Date(),
 ): Promise<boolean> {
+  // 確かめの push を送ったトークン (指紋、環境、topic) が、今の端末と合うときだけ記録する。
+  // 関数を呼ぶこと自体が引き継ぎになるので、呼ぶ側 (API-002) は、確かめの記録と突き合わせてから呼ぶ。
   const target = `
     SELECT devices.id FROM devices
-    WHERE devices.id = ?2 AND devices.token_fingerprint = ?3
+    WHERE devices.id = ?2 AND devices.token_fingerprint = ?3 AND devices.apns_environment = ?5 AND devices.topic = ?6
       AND devices.installation_id IN (${ACTIVE_INSTALLATIONS_OF_ACCOUNT})`;
   // 2 つの文は同じ条件 (target) で守り、記録できないときは、ほかの行の確かめも外さない。1 つのバッチで行う。
   const release = db.$client
@@ -96,13 +104,27 @@ export async function markDeviceVerified(
       WHERE id != ?2 AND verified_at IS NOT NULL
         AND (token_fingerprint, apns_environment, topic) = (SELECT token_fingerprint, apns_environment, topic FROM devices WHERE id = ?2)
         AND EXISTS (${target})`)
-    .bind(input.accountId, input.deviceId, input.tokenFingerprint, now.getTime());
+    .bind(
+      input.accountId,
+      input.deviceId,
+      input.tokenFingerprint,
+      now.getTime(),
+      input.apnsEnvironment,
+      input.topic,
+    );
   const verify = db.$client
     .prepare(`
       UPDATE devices SET verified_at = ?4, updated_at = ?4
       WHERE id IN (${target})
       RETURNING id`)
-    .bind(input.accountId, input.deviceId, input.tokenFingerprint, now.getTime());
+    .bind(
+      input.accountId,
+      input.deviceId,
+      input.tokenFingerprint,
+      now.getTime(),
+      input.apnsEnvironment,
+      input.topic,
+    );
   const [, verified] = await db.$client.batch<{ id: string }>([release, verify]);
   return (verified?.results.length ?? 0) > 0;
 }

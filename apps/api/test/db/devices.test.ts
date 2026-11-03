@@ -14,6 +14,7 @@ import {
   type Owner,
   registerToken,
   registerVerified,
+  TOPIC,
   testDb,
   unique,
 } from "./helpers";
@@ -43,6 +44,8 @@ describe("端末の登録", () => {
       accountId: alice.accountId,
       deviceId: device,
       tokenFingerprint: fingerprintOf(token),
+      apnsEnvironment: "sandbox",
+      topic: TOPIC,
     });
     expect((await listActiveDevices(db, alice.accountId)).map((d) => d.id)).toEqual([device]);
   });
@@ -80,6 +83,8 @@ describe("端末の登録", () => {
       accountId: alice.accountId,
       deviceId: first,
       tokenFingerprint: fingerprintOf(newToken),
+      apnsEnvironment: "sandbox",
+      topic: TOPIC,
     });
     expect((await listActiveDevices(db, alice.accountId)).map((d) => d.tokenFingerprint)).toEqual([
       fingerprintOf(newToken),
@@ -151,6 +156,8 @@ describe("端末の登録", () => {
         accountId: owner.accountId,
         deviceId: ownerDevice,
         tokenFingerprint: fingerprintOf(token),
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
       }),
     ).toBe(true);
     expect((await listActiveDevices(db, owner.accountId)).map((d) => d.id)).toEqual([ownerDevice]);
@@ -170,6 +177,8 @@ describe("端末の登録", () => {
         accountId: holder.accountId,
         deviceId: strangerDevice,
         tokenFingerprint: fingerprintOf(token),
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
       }),
     ).toBe(false);
     expect(
@@ -177,6 +186,8 @@ describe("端末の登録", () => {
         accountId: stranger.accountId,
         deviceId: strangerDevice,
         tokenFingerprint: "other",
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
       }),
     ).toBe(false);
     for (const makeInvalid of [revoke, (owner: Owner) => setAccountState(owner, "disabled")]) {
@@ -189,6 +200,8 @@ describe("端末の登録", () => {
           accountId: other.accountId,
           deviceId: otherDevice,
           tokenFingerprint: fingerprintOf(token),
+          apnsEnvironment: "sandbox",
+          topic: TOPIC,
         }),
       ).toBe(false);
     }
@@ -196,6 +209,26 @@ describe("端末の登録", () => {
     expect((await listActiveDevices(db, holder.accountId)).map((d) => d.id)).toEqual([
       holderDevice,
     ]);
+  });
+
+  it("確かめは、トークンの指紋だけでなく、環境と topic も今の端末と合うときだけ記録する", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const token = unique("token");
+    const device = deviceIdOf(await registerToken(db, alice, token));
+    const proven = {
+      accountId: alice.accountId,
+      deviceId: device,
+      tokenFingerprint: fingerprintOf(token),
+    };
+
+    expect(
+      await markDeviceVerified(db, { ...proven, apnsEnvironment: "production", topic: TOPIC }),
+    ).toBe(false);
+    expect(
+      await markDeviceVerified(db, { ...proven, apnsEnvironment: "sandbox", topic: "other.topic" }),
+    ).toBe(false);
+    expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
   });
 
   it("ほかのアカウントのインストール、取り消したインストール、止めたアカウントには登録しない", async () => {
@@ -293,6 +326,8 @@ describe("端末の状態", () => {
       accountId: alice.accountId,
       deviceId: device,
       tokenFingerprint: fingerprintOf(newToken),
+      apnsEnvironment: "sandbox",
+      topic: TOPIC,
     });
 
     expect(
