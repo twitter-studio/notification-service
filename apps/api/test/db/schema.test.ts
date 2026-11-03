@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { newAccount, testDb, testHash, unique } from "./helpers";
 
 describe("D1 のスキーマ", () => {
-  it("migration を当てると、設計書の 5 つの表と、登録の 2 つの表 (セッション、使ったチャレンジ)、端末の確かめの表がある", async () => {
+  it("migration を当てると、設計書の 5 つの表と、登録の 2 つの表 (セッション、使ったチャレンジ)、端末の確かめの表、中継の 1 日の数の表がある", async () => {
     const { results } = await env.DB.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY name",
     ).all<{ name: string }>();
@@ -15,6 +15,7 @@ describe("D1 のスキーマ", () => {
       "installations",
       "notification_accounts",
       "relay_credentials",
+      "relay_usage",
       "sessions",
       "used_challenges",
     ]);
@@ -32,7 +33,7 @@ describe("D1 のスキーマ", () => {
       env.DB.prepare(
         "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES (?, ?, ?)",
       ).bind(unique("credential"), missing, testHash()),
-      env.DB.prepare("INSERT INTO delivery_dedup (account_id, event_id) VALUES (?, 'e')").bind(
+      env.DB.prepare("INSERT INTO delivery_dedup (account_id, event_key) VALUES (?, 'e')").bind(
         missing,
       ),
     ];

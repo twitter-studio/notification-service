@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "38d766de-7e31-46d7-91b0-4eff1b6a41f6",
+  "id": "d2f274f9-9df1-4244-924a-2396dfad52af",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -14,8 +14,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "event_id": {
-          "name": "event_id",
+        "event_key": {
+          "name": "event_key",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -28,15 +28,32 @@
           "notNull": true,
           "autoincrement": false,
           "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'processing'"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
-      "indexes": {
-        "idx_delivery_dedup_accepted": {
-          "name": "idx_delivery_dedup_accepted",
-          "columns": ["accepted_at"],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "delivery_dedup_account_id_notification_accounts_id_fk": {
           "name": "delivery_dedup_account_id_notification_accounts_id_fk",
@@ -49,13 +66,18 @@
         }
       },
       "compositePrimaryKeys": {
-        "delivery_dedup_account_id_event_id_pk": {
-          "columns": ["account_id", "event_id"],
-          "name": "delivery_dedup_account_id_event_id_pk"
+        "delivery_dedup_account_id_event_key_pk": {
+          "columns": ["account_id", "event_key"],
+          "name": "delivery_dedup_account_id_event_key_pk"
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "delivery_dedup_state": {
+          "name": "delivery_dedup_state",
+          "value": "\"delivery_dedup\".\"state\" IN ('processing', 'done')"
+        }
+      }
     },
     "device_verifications": {
       "name": "device_verifications",
@@ -478,6 +500,47 @@
           "value": "length(\"relay_credentials\".\"secret_hash\") = 43 AND \"relay_credentials\".\"secret_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
         }
       }
+    },
+    "relay_usage": {
+      "name": "relay_usage",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "window_start": {
+          "name": "window_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "relay_usage_account_id_notification_accounts_id_fk": {
+          "name": "relay_usage_account_id_notification_accounts_id_fk",
+          "tableFrom": "relay_usage",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "sessions": {
       "name": "sessions",

@@ -8,6 +8,7 @@ import {
   installations,
   notificationAccounts,
   relayCredentials,
+  relayUsage,
   sessions,
 } from "./schema";
 
@@ -96,6 +97,7 @@ export async function deleteAccount(
 ): Promise<boolean> {
   const results = await db.batch([
     db.delete(deliveryDedup).where(eq(deliveryDedup.accountId, input.accountId)),
+    db.delete(relayUsage).where(eq(relayUsage.accountId, input.accountId)),
     db.delete(deviceVerifications).where(
       inArray(
         deviceVerifications.deviceId,
@@ -120,5 +122,5 @@ export async function deleteAccount(
       )
       .returning({ id: notificationAccounts.id }),
   ]);
-  return results[6].length > 0;
+  return results[7].length > 0;
 }

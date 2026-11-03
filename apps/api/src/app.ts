@@ -7,11 +7,13 @@ import {
   type DeviceVerificationSender,
   notConfiguredVerificationSender,
 } from "./devices/verification";
+import { notConfiguredPushGateway, type PushGateway } from "./notifications/push";
 import { ProblemError, problem } from "./problem";
 import { registerRelayCredentials } from "./routes/credentials";
 import { registerDevices } from "./routes/devices";
 import { registerEnrollment } from "./routes/enrollment";
 import { registerHealth } from "./routes/health";
+import { registerNotifications, SEND_BUDGET_MS } from "./routes/notifications";
 
 export type AppEnv = { Bindings: Env; Variables: { requestId: string } };
 
@@ -53,6 +55,10 @@ const requestId = createMiddleware<AppEnv>(async (c, next) => {
 export type AppOptions = {
   /** 端末の確かめの push を送る。APNs へ送る仕組み (APNS-002) ができるまでは、送らない。テストでは差し替える。 */
   sendDeviceVerification?: DeviceVerificationSender;
+  /** 端末へ通知を送る。APNs へ送る仕組み (APNS-002) ができるまでは、送らない。テストでは差し替える。 */
+  push?: PushGateway;
+  /** 1 つのイベントで端末へ送る時間の上限 (ミリ秒)。テストで短くする。 */
+  relaySendBudgetMs?: number;
 };
 
 export function createApp(options: AppOptions = {}) {
@@ -77,6 +83,11 @@ export function createApp(options: AppOptions = {}) {
   registerEnrollment(app);
   registerRelayCredentials(app);
   registerDevices(app, options.sendDeviceVerification ?? notConfiguredVerificationSender);
+  registerNotifications(
+    app,
+    options.push ?? notConfiguredPushGateway,
+    options.relaySendBudgetMs ?? SEND_BUDGET_MS,
+  );
 
   app.notFound((c) => problem(c, 404, "Not Found"));
   app.onError((error, c) => {

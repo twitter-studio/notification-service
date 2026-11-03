@@ -37,6 +37,12 @@
       "name": "TOKEN_RATE_LIMITER",
       "namespace_id": "1003",
       "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      // アカウントごと。中継の資格情報を確かめた後の、イベントの受け付けを数える (ADR-0009)。1 日の上限は DB で数える。
+      "name": "RELAY_RATE_LIMITER",
+      "namespace_id": "1004",
+      "simple": { "limit": 30, "period": 60 }
     }
   ],
   // 受け付けの記録の定期の掃除 (src/maintenance.ts)。1 日 1 回。Cron は UTC なので、日本時間の 3:17。

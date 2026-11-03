@@ -5,7 +5,8 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
-  acceptEventOnce,
+  beginEvent,
+  completeEvent,
   createDb,
   createSession,
   enrollInstallation,
@@ -44,19 +45,20 @@ it("定期の掃除は、残す期間より古い受け付けの記録だけを�
   const account = await newAccount();
   const scheduledTime = Date.parse("2026-11-10T18:17:00.000Z");
   const cutoff = scheduledTime - ACCEPTED_EVENT_RETENTION_MS;
-  await acceptEventOnce(db, { accountId: account.accountId, eventId: "old" }, new Date(cutoff - 1));
-  await acceptEventOnce(
-    db,
-    { accountId: account.accountId, eventId: "boundary" },
-    new Date(cutoff),
-  );
+  const old = { accountId: account.accountId, eventKey: "old" };
+  const boundary = { accountId: account.accountId, eventKey: "boundary" };
+  for (const [event, at] of [
+    [old, cutoff - 1],
+    [boundary, cutoff],
+  ] as const) {
+    const start = await beginEvent(db, event, new Date(at));
+    if (start.kind === "accepted") await completeEvent(db, { ...event, leaseId: start.leaseId });
+  }
 
   await runCleanup(scheduledTime);
 
-  expect(await acceptEventOnce(db, { accountId: account.accountId, eventId: "old" })).toBe(true);
-  expect(await acceptEventOnce(db, { accountId: account.accountId, eventId: "boundary" })).toBe(
-    false,
-  );
+  expect((await beginEvent(db, old)).kind).toBe("accepted");
+  expect((await beginEvent(db, boundary)).kind).toBe("done");
 });
 
 it("消す記録が多くても、件数を区切ってくり返し、全部消す", async () => {
@@ -65,7 +67,7 @@ it("消す記録が多くても、件数を区切ってくり返し、全部消�
   const old = scheduledTime - ACCEPTED_EVENT_RETENTION_MS - 1;
   const inserts = Array.from({ length: 1201 }, (_, i) =>
     env.DB.prepare(
-      "INSERT INTO delivery_dedup (account_id, event_id, accepted_at) VALUES (?, ?, ?)",
+      "INSERT INTO delivery_dedup (account_id, event_key, accepted_at) VALUES (?, ?, ?)",
     ).bind(account.accountId, `e${i}`, old),
   );
   await env.DB.batch(inserts);
@@ -88,7 +90,7 @@ it("くり返しの上限まで消したら、消し残しがありうること�
   await env.DB.batch(
     Array.from({ length: 5 }, (_, i) =>
       env.DB.prepare(
-        "INSERT INTO delivery_dedup (account_id, event_id, accepted_at) VALUES (?, ?, ?)",
+        "INSERT INTO delivery_dedup (account_id, event_key, accepted_at) VALUES (?, ?, ?)",
       ).bind(account.accountId, `capped-${i}`, old),
     ),
   );

@@ -1,12 +1,15 @@
 CREATE TABLE `delivery_dedup` (
 	`account_id` text NOT NULL,
-	`event_id` text NOT NULL,
+	`event_key` text NOT NULL,
 	`accepted_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
-	PRIMARY KEY(`account_id`, `event_id`),
-	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action
+	`state` text DEFAULT 'processing' NOT NULL,
+	`updated_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
+	`lease_id` text,
+	PRIMARY KEY(`account_id`, `event_key`),
+	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "delivery_dedup_state" CHECK("delivery_dedup"."state" IN ('processing', 'done'))
 );
 --> statement-breakpoint
-CREATE INDEX `idx_delivery_dedup_accepted` ON `delivery_dedup` (`accepted_at`);--> statement-breakpoint
 CREATE TABLE `device_verifications` (
 	`device_id` text PRIMARY KEY NOT NULL,
 	`code_hash` text NOT NULL,
@@ -77,6 +80,13 @@ CREATE TABLE `relay_credentials` (
 CREATE UNIQUE INDEX `relay_credentials_secret_hash_unique` ON `relay_credentials` (`secret_hash`);--> statement-breakpoint
 CREATE INDEX `idx_relay_credentials_account` ON `relay_credentials` (`account_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_relay_credentials_revoked` ON `relay_credentials` (`revoked_at`);--> statement-breakpoint
+CREATE TABLE `relay_usage` (
+	`account_id` text PRIMARY KEY NOT NULL,
+	`window_start` integer NOT NULL,
+	`count` integer NOT NULL,
+	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`account_id` text NOT NULL,

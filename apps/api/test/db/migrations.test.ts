@@ -23,7 +23,7 @@ it("データの入った D1 に後の migration を当てても、行が消え�
     db.prepare(
       "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES ('credential', 'account', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')",
     ),
-    db.prepare("INSERT INTO delivery_dedup (account_id, event_id) VALUES ('account', 'event')"),
+    db.prepare("INSERT INTO delivery_dedup (account_id, event_key) VALUES ('account', 'event')"),
   ]);
 
   await applyD1Migrations(db, env.TEST_MIGRATIONS);
@@ -33,7 +33,7 @@ it("データの入った D1 に後の migration を当てても、行が消え�
     ["installations", "id = 'installation'"],
     ["devices", "id = 'device'"],
     ["relay_credentials", "id = 'credential'"],
-    ["delivery_dedup", "event_id = 'event'"],
+    ["delivery_dedup", "event_key = 'event'"],
   ] as const) {
     const row = await db
       .prepare(`SELECT count(*) AS count FROM ${table} WHERE ${id}`)

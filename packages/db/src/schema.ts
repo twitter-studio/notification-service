@@ -158,14 +158,37 @@ export const deliveryDedup = sqliteTable(
     accountId: text("account_id")
       .notNull()
       .references(() => notificationAccounts.id),
-    eventId: text("event_id").notNull(),
+    // 送り手の event_id の、サーバーの鍵とアカウントを入れた HMAC (Base64URL)。event_id に X の ID などが入りうるので、
+    // 生の値も、鍵のないハッシュ (候補から確かめられる) も DB に置かない (ADR-0009)。
+    eventKey: text("event_key").notNull(),
     acceptedAt: timestamp("accepted_at").notNull().default(now),
+    // 送る処理の途中 (processing) か、済んだ (done) か。処理中のやり直しを、済んだ重複と分けて答えるため (ADR-0009)。
+    state: text("state", { enum: ["processing", "done"] })
+      .notNull()
+      .default("processing"),
+    // 状態を最後に書いた時刻。処理中のまま止まった記録 (Worker が途中で落ちた) を、やり直しで引き継ぐのに使う。
+    updatedAt: timestamp("updated_at").notNull().default(now),
+    // 受け付けと引き継ぎのたびに変える乱数の印。済みにする・消すのは、今の印を持つ要求だけにする (引き継がれた前の要求に触らせない)。
+    leaseId: text("lease_id"),
   },
   (t) => [
-    primaryKey({ columns: [t.accountId, t.eventId] }),
-    index("idx_delivery_dedup_accepted").on(t.acceptedAt),
+    primaryKey({ columns: [t.accountId, t.eventKey] }),
+    check("delivery_dedup_state", sql`${t.state} IN ('processing', 'done')`),
   ],
 );
+
+/**
+ * アカウントごとの、中継の受け付けの 1 日の数 (ADR-0009)。1 行で数え、受け付けのたびに 1 行だけ読み書きする。
+ * 受け付けの記録を数えると、上限に近いアカウントの要求のたびに、上限の数だけ行を読むため。
+ */
+export const relayUsage = sqliteTable("relay_usage", {
+  accountId: text("account_id")
+    .primaryKey()
+    .references(() => notificationAccounts.id),
+  // 数えている日 (UTC の 0 時)。日が変わったら、数え直す。
+  windowStart: timestamp("window_start").notNull(),
+  count: integer("count").notNull(),
+});
 
 /**
  * 使ったチャレンジ (登録やセッションの作り直しで、署名したもの)。同じチャレンジを 2 回使わせないため。
