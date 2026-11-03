@@ -49,9 +49,11 @@ const DeviceSchema = z
   .openapi("Device");
 
 const putRoute = createRoute({
+  operationId: "putDevice",
   method: "put",
   path: "/v1/devices/{id}",
   middleware: [requireSession] as const,
+  security: [{ session: [] }],
   summary:
     "端末の APNs のトークン、環境、topic を登録する (入れ替えも同じ)。確かめていなければ、確かめの push を送る",
   request: {
@@ -95,9 +97,11 @@ const putRoute = createRoute({
 });
 
 const verifyRoute = createRoute({
+  operationId: "verifyDevice",
   method: "post",
   path: "/v1/devices/{id}/verification",
   middleware: [requireSession] as const,
+  security: [{ session: [] }],
   summary: "確かめの push で届いた code を返し、端末がトークンを持っていることを確かめる",
   request: {
     params: ParamsSchema,
@@ -119,9 +123,11 @@ const verifyRoute = createRoute({
 });
 
 const disableRoute = createRoute({
+  operationId: "disableDevice",
   method: "delete",
   path: "/v1/devices/{id}",
   middleware: [requireSession] as const,
+  security: [{ session: [] }],
   summary: "端末への通知を止める",
   request: { params: ParamsSchema },
   responses: {

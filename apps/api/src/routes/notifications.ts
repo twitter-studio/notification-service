@@ -75,7 +75,9 @@ const relayRateLimit = createMiddleware<RelayEnv>(async (c, next) => {
 const route = createRoute({
   method: "post",
   path: "/v1/notifications",
+  operationId: "relayNotification",
   middleware: [requireRelayCredential, relayRateLimit] as const,
+  security: [{ relay: [] }],
   summary: "利用者の Worker からイベントを受け付け、中継の資格情報のアカウントの端末へ送る",
   request: {
     body: { required: true, content: { "application/json": { schema: EventSchema } } },

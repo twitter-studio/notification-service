@@ -36,6 +36,7 @@ const SessionSchema = z.object({ token: z.string(), expires_at: z.string() }).op
 const challengeRoute = createRoute({
   method: "post",
   path: "/v1/enrollments/challenge",
+  operationId: "issueChallenge",
   summary:
     "登録、セッションの作り直し、中継の資格情報の入れ替え、端末の登録で、端末の鍵に署名させるチャレンジを出す",
   request: {
@@ -66,6 +67,7 @@ const challengeRoute = createRoute({
 const enrollRoute = createRoute({
   method: "post",
   path: "/v1/enrollments",
+  operationId: "enroll",
   summary: "端末を登録し、アカウント、セッション、中継の資格情報を作る",
   request: {
     body: {
@@ -125,6 +127,7 @@ const enrollRoute = createRoute({
 const sessionRoute = createRoute({
   method: "post",
   path: "/v1/sessions",
+  operationId: "createSession",
   summary: "端末の鍵の署名で、セッションを作り直す",
   request: {
     body: {

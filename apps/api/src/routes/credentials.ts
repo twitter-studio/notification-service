@@ -29,7 +29,9 @@ import {
 const rotateRoute = createRoute({
   method: "post",
   path: "/v1/relay-credentials/rotate",
+  operationId: "rotateRelayCredential",
   middleware: [requireSession] as const,
+  security: [{ session: [] }],
   summary: "中継の資格情報を入れ替える。前のものはすべて取り消し、新しい秘密をこの応答でだけ返す",
   request: {
     body: { required: true, content: { "application/json": { schema: InstallationProofSchema } } },
@@ -54,7 +56,9 @@ const rotateRoute = createRoute({
 const revokeRoute = createRoute({
   method: "delete",
   path: "/v1/relay-credentials/{id}",
+  operationId: "revokeRelayCredential",
   middleware: [requireSession] as const,
+  security: [{ session: [] }],
   summary: "中継の資格情報を取り消す",
   request: { params: z.object({ id: z.uuid() }) },
   responses: {

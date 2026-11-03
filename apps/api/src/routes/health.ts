@@ -6,6 +6,7 @@ const HealthSchema = z.object({ status: z.literal("ok") }).openapi("Health");
 const route = createRoute({
   method: "get",
   path: "/health",
+  operationId: "getHealth",
   summary: "動いているかの確認",
   responses: {
     200: {

@@ -1,0 +1,1441 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "notification-service",
+    "version": "1",
+    "description": "tweetbot の通知の中継 API (twitter-studio/notification-service)。"
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "アカウントのセッション (tss_…、1 時間。ADR-0006)"
+      },
+      "relay": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "中継の資格情報 (tsr_…。利用者の Worker が使う。ADR-0007)"
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "Challenge": {
+        "type": "object",
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge",
+          "expires_at"
+        ]
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "request_id"
+        ]
+      },
+      "ExistingEnrollment": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "installation_id": {
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          }
+        },
+        "required": [
+          "account_id",
+          "installation_id",
+          "session"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at"
+        ]
+      },
+      "Enrollment": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "installation_id": {
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          },
+          "relay_secret": {
+            "type": "string"
+          },
+          "relay_credential_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "installation_id",
+          "session",
+          "relay_secret",
+          "relay_credential_id"
+        ]
+      },
+      "EnrollmentRequest": {
+        "type": "object",
+        "properties": {
+          "challenge": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "public_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "invite_code": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "challenge",
+          "public_key",
+          "signature",
+          "invite_code"
+        ]
+      },
+      "SessionRequest": {
+        "type": "object",
+        "properties": {
+          "installation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "challenge": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "installation_id",
+          "challenge",
+          "signature"
+        ]
+      },
+      "RelayCredential": {
+        "type": "object",
+        "properties": {
+          "relay_credential_id": {
+            "type": "string"
+          },
+          "relay_secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "relay_credential_id",
+          "relay_secret"
+        ]
+      },
+      "InstallationProof": {
+        "type": "object",
+        "properties": {
+          "challenge": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "challenge",
+          "signature"
+        ]
+      },
+      "DeviceRegistrationResult": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Device"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "verification_sent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "verification_sent"
+            ]
+          }
+        ]
+      },
+      "Device": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled_by_user",
+              "invalidated"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "device_id",
+          "state",
+          "verified"
+        ]
+      },
+      "DeviceRegistration": {
+        "type": "object",
+        "properties": {
+          "apns_token": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "apns_environment": {
+            "type": "string",
+            "enum": [
+              "sandbox",
+              "production"
+            ]
+          },
+          "topic": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "challenge": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "apns_token",
+          "apns_environment",
+          "topic",
+          "challenge",
+          "signature"
+        ]
+      },
+      "DeviceVerification": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "RelayAccepted": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "duplicate"
+            ]
+          }
+        },
+        "required": [
+          "event_id",
+          "status"
+        ]
+      },
+      "RelayEvent": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "mention",
+              "reply",
+              "quote",
+              "retweet",
+              "like",
+              "follow"
+            ]
+          },
+          "post_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "description": "ツイートの ID。follow 以外では要り、follow では送らない"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "event_id",
+          "type",
+          "occurred_at"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "動いているかの確認",
+        "responses": {
+          "200": {
+            "description": "動いている",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/enrollments/challenge": {
+      "post": {
+        "operationId": "issueChallenge",
+        "summary": "登録、セッションの作り直し、中継の資格情報の入れ替え、端末の登録で、端末の鍵に署名させるチャレンジを出す",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "enroll",
+                      "session",
+                      "relay_credential",
+                      "device"
+                    ]
+                  }
+                },
+                "required": [
+                  "purpose"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "チャレンジ (5 分で期限切れ。1 回だけ使える)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Challenge"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/enrollments": {
+      "post": {
+        "operationId": "enroll",
+        "summary": "端末を登録し、アカウント、セッション、中継の資格情報を作る",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrollmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "同じ鍵で、すでに登録していた。セッションだけを返す (中継の資格情報は入れ替えで作り直す。AUTH-002)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExistingEnrollment"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "登録した。中継の資格情報 (relay_secret) は、この応答でだけ返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Enrollment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "チャレンジか署名が正しくない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "登録を受け付けていない、招待のコードが違う、または取り消したインストールか止めたアカウントの鍵",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "チャレンジはもう使われた",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "端末の鍵の署名で、セッションを作り直す",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "セッション",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session": {
+                      "$ref": "#/components/schemas/Session"
+                    }
+                  },
+                  "required": [
+                    "session"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "チャレンジ、インストール、署名のどれかが正しくない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "チャレンジはもう使われた",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/relay-credentials/rotate": {
+      "post": {
+        "operationId": "rotateRelayCredential",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "中継の資格情報を入れ替える。前のものはすべて取り消し、新しい秘密をこの応答でだけ返す",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallationProof"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "新しい中継の資格情報",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "チャレンジはもう使われた",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/relay-credentials/{id}": {
+      "delete": {
+        "operationId": "revokeRelayCredential",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "中継の資格情報を取り消す",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "取り消した"
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "このアカウントの使える資格情報にない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/devices/{id}": {
+      "put": {
+        "operationId": "putDevice",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "端末の APNs のトークン、環境、topic を登録する (入れ替えも同じ)。確かめていなければ、確かめの push を送る",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRegistration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登録した端末",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRegistrationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "セッションのインストールでない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "チャレンジはもう使われた",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "disableDevice",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "端末への通知を止める",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "止めた"
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "セッションのインストールでない、または端末がない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/devices/{id}/verification": {
+      "post": {
+        "operationId": "verifyDevice",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "確かめの push で届いた code を返し、端末がトークンを持っていることを確かめる",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceVerification"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "確かめた",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "セッションのインストールでない、または端末がない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notifications": {
+      "post": {
+        "operationId": "relayNotification",
+        "security": [
+          {
+            "relay": []
+          }
+        ],
+        "summary": "利用者の Worker からイベントを受け付け、中継の資格情報のアカウントの端末へ送る",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "受け付けた (端末に出た証明ではない)。`duplicate` は、同じイベントをもう受け付けていた (送り手のやり直し)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "本文が JSON として読めない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "中継の資格情報がない、または使えない (やり直さない)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "同じイベントを送っている途中 (Retry-After の秒数を待ってやり直す)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "本文が 4 KiB を超える",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type が application/json でない",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーの誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "送れなかった (Retry-After の秒数を待ってやり直す)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

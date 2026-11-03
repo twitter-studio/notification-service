@@ -92,6 +92,7 @@ pnpm lint        # Biome (ADR-0001)
 pnpm typecheck   # wrangler types --check と tsc (本番のコードとテストで tsconfig を分けている)
 pnpm test        # Vitest。workerd の上で動かす (ADR-0002)
 pnpm build       # wrangler deploy --dry-run。デプロイはしない
+pnpm --filter @notification-service/api openapi   # 公開の API の OpenAPI の文書 (apps/api/openapi.json) を作り直す
 ```
 
 ### 決まり
@@ -100,7 +101,7 @@ pnpm build       # wrangler deploy --dry-run。デプロイはしない
 - 手元の秘密は `apps/api/.dev.vars` (コミットしない) に置き、名前だけを `apps/api/.dev.vars.example` に書く。型 (`worker-configuration.d.ts`) は `.dev.vars.example` から作る (`pnpm --filter @notification-service/api types`)。`wrangler.jsonc` か `.dev.vars.example` を変えたら作り直す (CI が `--check` で調べる)。
 - wrangler と `@cloudflare/*` は、Dependabot が 1 つの PR にまとめる。その PR は型の版が変わるので `typecheck` で落ちる。PR のブランチで `types` を動かし、型を作り直して push する。`compatibility_date` は、`@cloudflare/vitest-plugin` に付く workerd が対応する日付より新しくしない (ADR-0002)。
 - Node.js の版は `mise.toml` と `.github/workflows/ci.yml` の 2 か所にある。そろえて上げる (ADR-0003)。
-- 公開の API は `@hono/zod-openapi` のスキーマで先に決め、生成したものを手で直さない。エラーの応答は `src/problem.ts` の problem+json にし、`request_id` はサーバーで作る。エラーの文は応答にもログにも出さない。
+- 公開の API は `@hono/zod-openapi` のスキーマで先に決め、生成したものを手で直さない。入口には `operationId` を付け (アプリの Swift のクライアントのメソッドの名前になる)、セッションや中継の資格情報の要る入口には `security` を書く。API を変えたら `apps/api/openapi.json` を作り直す (テストが、作った文書と比べる。アプリのクライアントは、このファイルから作る。IOS-002)。エラーの応答は `src/problem.ts` の problem+json にし、`request_id` はサーバーで作る。エラーの文は応答にもログにも出さない。
 - APNs のデバイストークンは、`src/security/device-token.ts` の `sealDeviceToken` で、端末の行に結び付けて暗号化し、版の付いた指紋 (HMAC) と一緒に DB に置く (ADR-0005)。DB の関数はブランドの型で受け、DB も形を CHECK で確かめる。鍵は確かめの値 (`DEVICE_TOKEN_KEY_CHECKS`、`scripts/key-check.mjs` で作る) と比べてから使う。暗号化の鍵の入れ替えは 2 段で行い (足してから current にする)、古い鍵は古い暗号文がなくなるまで残す。指紋の鍵は入れ替えない。トークン、鍵、暗号文、指紋は、ログにもエラーの文にも出さない。
 - 登録とセッションの約束事 (チャレンジ、端末の鍵の署名、トークン) は ADR-0006、中継の資格情報の入れ替えと取り消しは ADR-0007、端末の登録とトークンを持っていることの確かめは ADR-0008、中継の受け付けと端末へ送る流れは ADR-0009、使われなくなったアカウントを消すのは ADR-0010。試作のあいだは、招待のコード (`ENROLLMENT_INVITE_CODE`) がないと登録できない。App Attest を確かめるまで (AUTH-003) この制限を外さない。
 - 型の付いた入口 (zod-openapi) からは、宣言した成功の応答だけを返し、失敗は `ProblemError` を投げる (app.ts の onError が problem+json にする)。アカウントのセッションが要る入口には、`createRoute` の `middleware` に `requireSession` を置く (`c.get("session")` は、置いた入口でだけ型に出る。`app.use` で付けると型に出ない)。中継の資格情報で送る入口には `requireRelayCredential` を置く (ADR-0007)。
