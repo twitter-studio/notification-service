@@ -104,4 +104,8 @@ pnpm build       # wrangler deploy --dry-run。デプロイはしない
 - `observability` のログにはリクエストのヘッダーも残る。秘密を独自のヘッダーで受けるときは、ログに残らないかを確かめる。
 - `wrangler deploy` を `--dry-run` なしで動かさない (デプロイはオーナーの承認を得てから)。Cloudflare の資格情報と秘密は、このリポジトリに置かない。
 - `GET /health` などの公開の応答に、版、設定、秘密の有無を出さない。
+- D1 のスキーマは `packages/db/src/schema.ts` に書き、migration は `pnpm --filter @notification-service/db generate` (drizzle-kit) で作る。作った SQL を手で直さない。本番の D1 に migration を当てるのは、オーナーの承認を得てから。
+- DB の時刻は UTC の ISO 8601 (`toDbTime`) にそろえる。`CURRENT_TIMESTAMP` は形が違い、文字列で比べると期限がずれる。
+- DB の読み書きは、アカウントをまたがないよう、条件にアカウントを入れる。テストで、ほかのアカウントに触れないことを確かめる。
+- テストの D1 は、同じファイルのテストどうしで空にならない。ID、ハッシュ、トークンはテストごとに違う値 (`unique()`) にし、ほかのテストの行に頼らない。
 - テストは `apps/api/test/` に置く (設計書 §7 の `tests/{unit,…}` は、workspace に合わせてパッケージの中に置いた)。

@@ -7,7 +7,8 @@ Hono と `@hono/zod-openapi` で Cloudflare Workers (`*.workers.dev`) に置き�
 ## 構成
 
 - `apps/api`: Worker (Hono)。`wrangler.jsonc` が設定。テストは `apps/api/test/`。
-- `packages/*`: 契約 (OpenAPI のスキーマ)、DB などを足すときに置く。
+- `packages/db`: D1 のスキーマ (Drizzle)、migration (`migrations/`)、読み書きの関数。
+- `packages/*`: 契約 (OpenAPI のスキーマ) などを足すときに置く。
 - `docs/adr`: この API の ADR。
 
 ## 開発
