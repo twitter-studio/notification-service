@@ -1,6 +1,6 @@
 # notification-service — エージェントの規則
 
-この前半は、組織の共通の規則 (`twitter-studio/.github/AGENTS.md`、commit 5532af1) の写し。後半の「このリポジトリ」が、このリポジトリ固有の規則。
+この前半は、組織の共通の規則 (`twitter-studio/.github/AGENTS.md`、commit 47af325) の写し。後半の「このリポジトリ」が、このリポジトリ固有の規則。
 
 この規則の正本は `twitter-studio/.github/AGENTS.md`。各リポジトリの `AGENTS.md` には、この規則の写しと、そのリポジトリ固有の規則と検証のコマンドを置く (下の「各リポジトリに写すもの」)。リンクだけで引き継いだとみなさない。リポジトリ固有の規則がこの規則と違うときは、リポジトリ固有の規則に、違う理由と一緒に書く。
 
@@ -72,6 +72,7 @@ OS、ライブラリ、外部のサービスの不具合や制約をワークア
 - `AGENTS.md`: この規則の写し (写した元の commit を書く) と、リポジトリ固有の規則と検証のコマンド。
 - `.github/CODEOWNERS`、`.github/pull_request_template.md`。
 - CI (`.github/workflows/`) と `zizmor.yml`、`.github/dependabot.yml` (cooldown をつける)。
+- `LICENSE`: Apache License 2.0 (tweetbot と同じ。オーナーの判断)。
 
 共通の規則を変えたら、各リポジトリに追従の PR を出し、写した元の commit を書く。
 
