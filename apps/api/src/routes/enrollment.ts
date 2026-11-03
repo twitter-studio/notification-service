@@ -193,12 +193,16 @@ const UNKNOWN_INSTALLATION_KEY = parseInstallationPublicKey(
  * 招待のコードを確かめる。秘密 `ENROLLMENT_INVITE_CODE` がない、または短いときは、登録を受け付けない
  * (試作のあいだの制限。ADR-0006)。受け付けていないときとコードが違うときは、同じ応答にする (秘密を置いたかを探らせない)。
  */
-async function checkInvite(c: Context<AppEnv>, inviteCode: string): Promise<void> {
+async function checkInvite(
+  c: Context<AppEnv>,
+  inviteCode: string,
+  warnings: { shortInviteCode: boolean },
+): Promise<void> {
   const expected = c.env.ENROLLMENT_INVITE_CODE ?? "";
   const open = INVITE_CODE_SHAPE.test(expected);
-  if (expected.length > 0 && !open && !warnedShortInviteCode) {
-    // 値は出さない。要求のたびに出すとログを埋められるので、isolate ごとに 1 回だけ出す。
-    warnedShortInviteCode = true;
+  if (expected.length > 0 && !open && !warnings.shortInviteCode) {
+    // 値は出さない。要求のたびに出すとログを埋められるので、アプリ (isolate) ごとに 1 回だけ出す。
+    warnings.shortInviteCode = true;
     console.error(JSON.stringify({ event: "enrollment_invite_code_too_short" }));
   }
   // 受け付けていないときも比べ、かかる時間で秘密を置いたかを探らせない。
@@ -206,13 +210,14 @@ async function checkInvite(c: Context<AppEnv>, inviteCode: string): Promise<void
   if (!open || !matches) throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
 }
 
-let warnedShortInviteCode = false;
-
 function challengeKey(env: Env): Promise<CryptoKey> {
   return loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
 }
 
 export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
+  /** 設定の誤りのログを、もう出したか。アプリごとに持つ (本番では isolate ごとに 1 つのアプリ)。 */
+  const warnings = { shortInviteCode: false };
+
   app.openapi(challengeRoute, async (c) => {
     await enforceRateLimit(c.env.CLIENT_RATE_LIMITER, clientAddressKey(c.req.raw));
     const { purpose } = c.req.valid("json");
@@ -223,7 +228,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
   app.openapi(enrollRoute, async (c) => {
     await enforceRateLimit(c.env.CLIENT_RATE_LIMITER, clientAddressKey(c.req.raw));
     const body = c.req.valid("json");
-    await checkInvite(c, body.invite_code);
+    await checkInvite(c, body.invite_code, warnings);
 
     const now = new Date();
     let challenge: { nonce: string; expiresAt: Date };
