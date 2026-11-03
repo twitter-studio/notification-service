@@ -1,0 +1,7 @@
+packages:
+  - apps/*
+  - packages/*
+# インストール時のスクリプトは、Worker のビルドと手元の実行環境に要るものだけを許す。
+allowBuilds:
+  esbuild: true
+  workerd: true

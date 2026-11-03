@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # 公開されたばかりの版は、乗っ取られた版だった場合に気づく間がないので、数日待つ。
+    cooldown:
+      default-days: 3

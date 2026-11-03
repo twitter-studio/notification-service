@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "notification-service",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-29",
+  // Wrangler の利用状況を Cloudflare に送らない。
+  "send_metrics": false,
+  "observability": {
+    "enabled": true
+  }
+}
