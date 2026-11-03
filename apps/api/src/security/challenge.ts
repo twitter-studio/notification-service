@@ -14,7 +14,7 @@ export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
  */
 export const CLOCK_SKEW_MS = 60 * 1000;
 
-export type ChallengePurpose = "enroll" | "session";
+export type ChallengePurpose = "enroll" | "session" | "relay_credential";
 
 /** チャレンジが壊れている、期限切れ、用途が違う (401)。 */
 export class InvalidChallengeError extends Error {
@@ -29,7 +29,7 @@ export class ChallengeKeyError extends Error {
 const PayloadSchema = z.object({
   v: z.literal(1),
   n: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
-  p: z.enum(["enroll", "session"]),
+  p: z.enum(["enroll", "session", "relay_credential"]),
   e: z.number().int(),
 });
 
@@ -51,6 +51,11 @@ export async function loadChallengeKey(
     "sign",
     "verify",
   ]);
+}
+
+/** 環境の秘密 (`CHALLENGE_SIGNING_KEY`) から、チャレンジの署名の鍵を読む。 */
+export function challengeKeyFromEnv(env: Env): Promise<CryptoKey> {
+  return loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
 }
 
 /** 用途ごとのチャレンジを作る。形は `c1.<内容>.<HMAC>`。 */

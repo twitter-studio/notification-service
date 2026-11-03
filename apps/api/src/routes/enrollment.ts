@@ -11,9 +11,9 @@ import type { AppEnv } from "../app";
 import { ProblemError } from "../problem";
 import { constantTimeEquals, hashBearerToken, newBearerToken } from "../security/bearer";
 import {
+  challengeKeyFromEnv,
   InvalidChallengeError,
   issueChallenge,
-  loadChallengeKey,
   verifyChallenge,
 } from "../security/challenge";
 import {
@@ -24,48 +24,27 @@ import {
   verifyInstallationSignature,
 } from "../security/installation-key";
 import { clientAddressKey, enforceRateLimit } from "../security/rate-limit";
+import { commonProblems, problemResponse } from "./openapi";
 
 // 端末の登録と、セッションの作り直し (設計書 §3 の手順 1〜3、ADR-0006)。
 
 /** セッションの長さ。短くし、端末の鍵の署名で作り直す。 */
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
-const ProblemSchema = z
-  .object({
-    type: z.string(),
-    title: z.string(),
-    status: z.number().int(),
-    detail: z.string().optional(),
-    request_id: z.string(),
-  })
-  .openapi("Problem");
-
-const problemResponse = (description: string) => ({
-  description,
-  content: { "application/problem+json": { schema: ProblemSchema } },
-});
-
-/** どの入口でも返しうるエラー。 */
-const commonProblems = {
-  400: problemResponse("本文が JSON として読めない"),
-  413: problemResponse("本文が 4 KiB を超える"),
-  415: problemResponse("Content-Type が application/json でない"),
-  422: problemResponse("入力の誤り"),
-  429: problemResponse("回数の制限を超えた (Retry-After の秒数を待つ)"),
-  500: problemResponse("サーバーの誤り"),
-};
-
 const SessionSchema = z.object({ token: z.string(), expires_at: z.string() }).openapi("Session");
 
 const challengeRoute = createRoute({
   method: "post",
   path: "/v1/enrollments/challenge",
-  summary: "登録かセッションの作り直しで、端末の鍵に署名させるチャレンジを出す",
+  summary:
+    "登録、セッションの作り直し、中継の資格情報の入れ替えで、端末の鍵に署名させるチャレンジを出す",
   request: {
     body: {
       required: true,
       content: {
-        "application/json": { schema: z.object({ purpose: z.enum(["enroll", "session"]) }) },
+        "application/json": {
+          schema: z.object({ purpose: z.enum(["enroll", "session", "relay_credential"]) }),
+        },
       },
     },
   },
@@ -210,10 +189,6 @@ async function checkInvite(
   if (!open || !matches) throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
 }
 
-function challengeKey(env: Env): Promise<CryptoKey> {
-  return loadChallengeKey(env.CHALLENGE_SIGNING_KEY, env.DEVICE_TOKEN_KEY_CHECKS);
-}
-
 export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
   /** 設定の誤りのログを、もう出したか。アプリごとに持つ (本番では isolate ごとに 1 つのアプリ)。 */
   const warnings = { shortInviteCode: false };
@@ -221,7 +196,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
   app.openapi(challengeRoute, async (c) => {
     await enforceRateLimit(c.env.CLIENT_RATE_LIMITER, clientAddressKey(c.req.raw));
     const { purpose } = c.req.valid("json");
-    const issued = await issueChallenge(await challengeKey(c.env), purpose);
+    const issued = await issueChallenge(await challengeKeyFromEnv(c.env), purpose);
     return c.json({ challenge: issued.challenge, expires_at: issued.expiresAt.toISOString() }, 200);
   });
 
@@ -234,7 +209,12 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
     let challenge: { nonce: string; expiresAt: Date };
     let publicKey: Uint8Array<ArrayBuffer>;
     try {
-      challenge = await verifyChallenge(await challengeKey(c.env), body.challenge, "enroll", now);
+      challenge = await verifyChallenge(
+        await challengeKeyFromEnv(c.env),
+        body.challenge,
+        "enroll",
+        now,
+      );
       publicKey = parseInstallationPublicKey(body.public_key);
     } catch (error) {
       if (error instanceof InvalidChallengeError)
@@ -324,7 +304,12 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
     const now = new Date();
     let challenge: { nonce: string; expiresAt: Date };
     try {
-      challenge = await verifyChallenge(await challengeKey(c.env), body.challenge, "session", now);
+      challenge = await verifyChallenge(
+        await challengeKeyFromEnv(c.env),
+        body.challenge,
+        "session",
+        now,
+      );
     } catch (error) {
       if (error instanceof InvalidChallengeError)
         throw new ProblemError(401, "Unauthorized", "The challenge is invalid.");

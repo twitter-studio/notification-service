@@ -7,4 +7,4 @@ export * from "./enroll";
 export { isUniqueViolation } from "./errors";
 export * as schema from "./schema";
 export * from "./sessions";
-export type { DeviceTokenCiphertext, DeviceTokenFingerprint } from "./types";
+export type { BearerTokenHash, DeviceTokenCiphertext, DeviceTokenFingerprint } from "./types";

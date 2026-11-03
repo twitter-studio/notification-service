@@ -9,7 +9,7 @@ import {
   revokeInstallation,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
-import { newAccount, testDb, unique } from "./helpers";
+import { newAccount, testDb, testHash, unique } from "./helpers";
 
 const now = new Date("2026-11-04T00:00:00.000Z");
 const later = new Date(now.getTime() + 60 * 60 * 1000);
@@ -23,7 +23,7 @@ describe("セッション", () => {
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
-    const tokenHash = unique("hash");
+    const tokenHash = testHash();
 
     expect(
       await createSession(
@@ -32,7 +32,7 @@ describe("セッション", () => {
           accountId: bob.accountId,
           installationId: alice.installationId,
           challenge: newChallenge(),
-          session: { tokenHash: unique("h"), expiresAt: later },
+          session: { tokenHash: testHash(), expiresAt: later },
         },
         now,
       ),
@@ -56,14 +56,14 @@ describe("セッション", () => {
     const challenge = newChallenge();
     await createSession(
       db,
-      { ...alice, challenge, session: { tokenHash: unique("h"), expiresAt: later } },
+      { ...alice, challenge, session: { tokenHash: testHash(), expiresAt: later } },
       now,
     );
 
     await expect(
       createSession(
         db,
-        { ...alice, challenge, session: { tokenHash: unique("h"), expiresAt: later } },
+        { ...alice, challenge, session: { tokenHash: testHash(), expiresAt: later } },
         now,
       ),
     ).rejects.toSatisfy((error) => isUniqueViolation(error, "used_challenges.nonce"));
@@ -73,13 +73,13 @@ describe("セッション", () => {
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
-    const bobHash = unique("h");
+    const bobHash = testHash();
     await createSession(
       db,
       { ...bob, challenge: newChallenge(), session: { tokenHash: bobHash, expiresAt: later } },
       now,
     );
-    const hashes = Array.from({ length: MAX_SESSIONS_PER_INSTALLATION + 1 }, () => unique("h"));
+    const hashes = Array.from({ length: MAX_SESSIONS_PER_INSTALLATION + 1 }, () => testHash());
     for (const [index, tokenHash] of hashes.entries()) {
       await createSession(
         db,
@@ -109,7 +109,7 @@ describe("セッション", () => {
     const expired = await newAccount(db);
     const revoked = await newAccount(db);
     const deleted = await newAccount(db);
-    const hashes = { expired: unique("h"), revoked: unique("h"), deleted: unique("h") };
+    const hashes = { expired: testHash(), revoked: testHash(), deleted: testHash() };
     await createSession(
       db,
       {
@@ -161,7 +161,7 @@ describe("セッション", () => {
       {
         ...alice,
         challenge: { nonce: unique("nonce"), expiresAt: past },
-        session: { tokenHash: unique("h"), expiresAt: past },
+        session: { tokenHash: testHash(), expiresAt: past },
       },
       past,
     );

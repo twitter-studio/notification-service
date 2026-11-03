@@ -21,7 +21,7 @@ it("データの入った D1 に後の migration を当てても、行が消え�
       "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, verified_at) VALUES ('device', 'installation', 'v1.c', 'f1.f', 'sandbox', 't', 1)",
     ),
     db.prepare(
-      "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES ('credential', 'account', 'hash')",
+      "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES ('credential', 'account', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')",
     ),
     db.prepare("INSERT INTO delivery_dedup (account_id, event_id) VALUES ('account', 'event')"),
   ]);

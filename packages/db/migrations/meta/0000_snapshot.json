@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c1e4df54-6d77-4257-aa1c-a62b3070d8f3",
+  "id": "b8880c38-3d87-4331-aa3a-4bf42b324252",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -369,7 +369,12 @@
         },
         "idx_relay_credentials_account": {
           "name": "idx_relay_credentials_account",
-          "columns": ["account_id"],
+          "columns": ["account_id", "created_at"],
+          "isUnique": false
+        },
+        "idx_relay_credentials_revoked": {
+          "name": "idx_relay_credentials_revoked",
+          "columns": ["revoked_at"],
           "isUnique": false
         }
       },
@@ -386,7 +391,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "relay_credentials_secret_hash": {
+          "name": "relay_credentials_secret_hash",
+          "value": "length(\"relay_credentials\".\"secret_hash\") = 43 AND \"relay_credentials\".\"secret_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
+        }
+      }
     },
     "sessions": {
       "name": "sessions",
@@ -486,7 +496,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "sessions_token_hash": {
+          "name": "sessions_token_hash",
+          "value": "length(\"sessions\".\"token_hash\") = 43 AND \"sessions\".\"token_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
+        }
+      }
     },
     "used_challenges": {
       "name": "used_challenges",

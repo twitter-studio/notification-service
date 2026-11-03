@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { newAccount, testDb, unique } from "./helpers";
+import { newAccount, testDb, testHash, unique } from "./helpers";
 
 describe("D1 のスキーマ", () => {
   it("migration を当てると、設計書の 5 つの表と、登録の 2 つの表 (セッション、使ったチャレンジ) がある", async () => {
@@ -30,7 +30,7 @@ describe("D1 のスキーマ", () => {
       ).bind(unique("device"), missing, `f1.${unique("fingerprint")}`),
       env.DB.prepare(
         "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES (?, ?, ?)",
-      ).bind(unique("credential"), missing, unique("hash")),
+      ).bind(unique("credential"), missing, testHash()),
       env.DB.prepare("INSERT INTO delivery_dedup (account_id, event_id) VALUES (?, 'e')").bind(
         missing,
       ),
