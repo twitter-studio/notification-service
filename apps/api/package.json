@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "1.6.3",
+    "@notification-service/db": "workspace:*",
     "hono": "4.13.14",
     "zod": "4.6.7"
   },

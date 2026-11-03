@@ -5,6 +5,15 @@
   "compatibility_date": "2026-10-29",
   // Wrangler の利用状況を Cloudflare に送らない。
   "send_metrics": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "notification-service",
+      // 手元とテスト用の仮の ID。本番の D1 はオーナーの承認を得てから作り、ここを本物の ID にする (仮の ID のままではデプロイできない)。
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
   "observability": {
     "enabled": true
   }

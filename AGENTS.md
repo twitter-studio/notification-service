@@ -104,4 +104,8 @@ pnpm build       # wrangler deploy --dry-run。デプロイはしない
 - `observability` のログにはリクエストのヘッダーも残る。秘密を独自のヘッダーで受けるときは、ログに残らないかを確かめる。
 - `wrangler deploy` を `--dry-run` なしで動かさない (デプロイはオーナーの承認を得てから)。Cloudflare の資格情報と秘密は、このリポジトリに置かない。
 - `GET /health` などの公開の応答に、版、設定、秘密の有無を出さない。
+- D1 のスキーマは `packages/db/src/schema.ts` に書き、migration は `pnpm --filter @notification-service/db generate` (drizzle-kit) で作る。作った SQL を手で直さない。例外は、親の表を作り直す migration だけ。drizzle-kit が出す `PRAGMA foreign_keys` は D1 で効かないので、先頭に `PRAGMA defer_foreign_keys = on`、末尾に `PRAGMA defer_foreign_keys = off` を置き、途中の `PRAGMA foreign_keys` の行はすべて消す (off は末尾だけ。途中に置くと、そのあとの作り直しで失敗する。ADR-0004)。末尾の off は本当の違反も数えなくするので、`migrations.test.ts` が `PRAGMA foreign_key_check` で、親のない子の行がないことを確かめる。外部キーは CASCADE にしない (表を作り直すと、子の行が消える)。データの入った D1 に migration を当てても行が残ることは、`migrations.test.ts` で確かめる。CI が、schema.ts と migration のずれを調べる。本番の D1 に migration を当てるのは、オーナーの承認を得てから。
+- DB の時刻は、UNIX 時間のミリ秒の整数で持つ (ADR-0004)。生の SQL で `CURRENT_TIMESTAMP` などの文字列の時刻と比べない。
+- DB の読み書きは、アカウントをまたがないよう、条件にアカウントを入れる。テストで、ほかのアカウントに触れないことを確かめる。例外は、アカウントを決めるための読み (`findActiveRelayCredential`。資格情報のハッシュでアカウントが決まる)、サーバーが選んだ端末への APNs の応答 (`invalidateDevice`。トークンの指紋も合わせる)、確かめで、同じトークンを確かめていたほかの行の確かめを外すこと (`markDeviceVerified`。確かめた側が自分のアカウントの有効なインストールのときだけ)、定期の掃除 (`deleteAcceptedEventsBefore`) だけ。
+- テストの D1 は、同じファイルのテストどうしで空にならない。ID、ハッシュ、トークンはテストごとに違う値 (`unique()`) にし、ほかのテストの行に頼らない。
 - テストは `apps/api/test/` に置く (設計書 §7 の `tests/{unit,…}` は、workspace に合わせてパッケージの中に置いた)。
