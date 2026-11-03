@@ -29,7 +29,13 @@ import {
   verifyInstallationSignature,
 } from "../security/installation-key";
 import { enforceRateLimit, isWithinRateLimit, rateLimitKeyOf } from "../security/rate-limit";
-import { commonProblems, problemResponse, sessionProblems } from "./openapi";
+import {
+  commonProblems,
+  idSchema,
+  problemResponse,
+  sessionProblems,
+  signedSessionProblems,
+} from "./openapi";
 
 // 端末 (APNs のトークン) の登録、入れ替え、止める、トークンを持っていることの確かめ (設計書 §4、API-002、ADR-0008)。
 // v1 の端末はインストールごとに 1 つなので、`{id}` はインストールの ID。セッションのインストールのものだけを扱う。
@@ -37,16 +43,16 @@ import { commonProblems, problemResponse, sessionProblems } from "./openapi";
 /** 確かめの code の期限。 */
 export const DEVICE_VERIFICATION_TTL_MS = 10 * 60 * 1000;
 
-const ParamsSchema = z.object({ id: z.uuid() });
+const ParamsSchema = z.object({ id: idSchema("インストールの ID") });
 
-const DeviceSchema = z
-  .object({
-    device_id: z.string(),
-    state: z.enum(["active", "disabled_by_user", "invalidated"]),
-    /** トークンを持っていることを確かめたか。確かめるまで通知を送らない。 */
-    verified: z.boolean(),
-  })
-  .openapi("Device");
+const deviceFields = {
+  device_id: z.string(),
+  state: z.enum(["active", "disabled_by_user", "invalidated"]),
+  /** トークンを持っていることを確かめたか。確かめるまで通知を送らない。 */
+  verified: z.boolean(),
+};
+
+const DeviceSchema = z.object(deviceFields).openapi("Device");
 
 const putRoute = createRoute({
   operationId: "putDevice",
@@ -82,14 +88,18 @@ const putRoute = createRoute({
       description: "登録した端末",
       content: {
         "application/json": {
-          schema: DeviceSchema.extend({
-            /** 確かめの push を送ったか (APNs へ送る仕組みがまだないときは false)。 */
-            verification_sent: z.boolean(),
-          }).openapi("DeviceRegistrationResult"),
+          // Device を extend すると allOf になり、生成した Swift の型が 2 つに分かれるので、欄を並べ直す。
+          schema: z
+            .object({
+              ...deviceFields,
+              /** 確かめの push を送ったか (APNs へ送る仕組みがまだないときは false)。 */
+              verification_sent: z.boolean(),
+            })
+            .openapi("DeviceRegistrationResult"),
         },
       },
     },
-    ...sessionProblems,
+    ...signedSessionProblems,
     404: problemResponse("セッションのインストールでない"),
     409: problemResponse("チャレンジはもう使われた"),
     ...commonProblems,

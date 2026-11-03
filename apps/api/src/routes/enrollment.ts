@@ -24,7 +24,7 @@ import {
   verifyInstallationSignature,
 } from "../security/installation-key";
 import { clientAddressKey, enforceRateLimit } from "../security/rate-limit";
-import { commonProblems, problemResponse } from "./openapi";
+import { commonProblems, idSchema, problemResponse } from "./openapi";
 
 // 端末の登録と、セッションの作り直し (設計書 §3 の手順 1〜3、ADR-0006)。
 
@@ -44,9 +44,9 @@ const challengeRoute = createRoute({
       required: true,
       content: {
         "application/json": {
-          schema: z.object({
-            purpose: z.enum(["enroll", "session", "relay_credential", "device"]),
-          }),
+          schema: z
+            .object({ purpose: z.enum(["enroll", "session", "relay_credential", "device"]) })
+            .openapi("ChallengeRequest"),
         },
       },
     },
@@ -136,7 +136,7 @@ const sessionRoute = createRoute({
         "application/json": {
           schema: z
             .object({
-              installation_id: z.uuid(),
+              installation_id: idSchema("インストールの ID"),
               challenge: z.string().max(512),
               signature: z.string().max(128),
             })
@@ -148,7 +148,11 @@ const sessionRoute = createRoute({
   responses: {
     201: {
       description: "セッション",
-      content: { "application/json": { schema: z.object({ session: SessionSchema }) } },
+      content: {
+        "application/json": {
+          schema: z.object({ session: SessionSchema }).openapi("SessionResult"),
+        },
+      },
     },
     401: problemResponse("チャレンジ、インストール、署名のどれかが正しくない"),
     409: problemResponse("チャレンジはもう使われた"),

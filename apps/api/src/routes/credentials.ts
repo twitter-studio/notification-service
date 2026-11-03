@@ -20,8 +20,10 @@ import { enforceRateLimit } from "../security/rate-limit";
 import {
   commonProblems,
   InstallationProofSchema,
+  idSchema,
   problemResponse,
   sessionProblems,
+  signedSessionProblems,
 } from "./openapi";
 
 // 中継の資格情報の入れ替えと取り消し (設計書 §4、AUTH-002、ADR-0007)。
@@ -47,7 +49,7 @@ const rotateRoute = createRoute({
         },
       },
     },
-    ...sessionProblems,
+    ...signedSessionProblems,
     409: problemResponse("チャレンジはもう使われた"),
     ...commonProblems,
   },
@@ -60,7 +62,7 @@ const revokeRoute = createRoute({
   middleware: [requireSession] as const,
   security: [{ session: [] }],
   summary: "中継の資格情報を取り消す",
-  request: { params: z.object({ id: z.uuid() }) },
+  request: { params: z.object({ id: idSchema("中継の資格情報の ID") }) },
   responses: {
     204: { description: "取り消した" },
     ...sessionProblems,

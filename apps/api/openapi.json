@@ -74,6 +74,23 @@
           "request_id"
         ]
       },
+      "ChallengeRequest": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "enroll",
+              "session",
+              "relay_credential",
+              "device"
+            ]
+          }
+        },
+        "required": [
+          "purpose"
+        ]
+      },
       "ExistingEnrollment": {
         "type": "object",
         "properties": {
@@ -162,12 +179,24 @@
           "invite_code"
         ]
       },
+      "SessionResult": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          }
+        },
+        "required": [
+          "session"
+        ]
+      },
       "SessionRequest": {
         "type": "object",
         "properties": {
           "installation_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る"
           },
           "challenge": {
             "type": "string",
@@ -217,24 +246,6 @@
         ]
       },
       "DeviceRegistrationResult": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Device"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "verification_sent": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "verification_sent"
-            ]
-          }
-        ]
-      },
-      "Device": {
         "type": "object",
         "properties": {
           "device_id": {
@@ -250,12 +261,16 @@
           },
           "verified": {
             "type": "boolean"
+          },
+          "verification_sent": {
+            "type": "boolean"
           }
         },
         "required": [
           "device_id",
           "state",
-          "verified"
+          "verified",
+          "verification_sent"
         ]
       },
       "DeviceRegistration": {
@@ -294,6 +309,30 @@
           "topic",
           "challenge",
           "signature"
+        ]
+      },
+      "Device": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled_by_user",
+              "invalidated"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "device_id",
+          "state",
+          "verified"
         ]
       },
       "DeviceVerification": {
@@ -352,7 +391,8 @@
           },
           "occurred_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "イベントが起きた時刻。UTC (末尾が Z) で送る"
           }
         },
         "required": [
@@ -393,21 +433,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "purpose": {
-                    "type": "string",
-                    "enum": [
-                      "enroll",
-                      "session",
-                      "relay_credential",
-                      "device"
-                    ]
-                  }
-                },
-                "required": [
-                  "purpose"
-                ]
+                "$ref": "#/components/schemas/ChallengeRequest"
               }
             }
           }
@@ -464,7 +490,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -592,7 +628,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -634,15 +680,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "session": {
-                      "$ref": "#/components/schemas/Session"
-                    }
-                  },
-                  "required": [
-                    "session"
-                  ]
+                  "$ref": "#/components/schemas/SessionResult"
                 }
               }
             }
@@ -708,7 +746,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -771,7 +819,7 @@
             }
           },
           "401": {
-            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける。セッションを作り直す)。WWW-Authenticate がなければ、チャレンジか署名が正しくないか、インストールが使えない (セッションを作り直しても直らない)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -821,7 +869,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -856,9 +914,11 @@
           {
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "description": "中継の資格情報の ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る"
             },
             "required": true,
+            "description": "中継の資格情報の ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る",
             "name": "id",
             "in": "path"
           }
@@ -878,7 +938,7 @@
             }
           },
           "401": {
-            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける。セッションを作り直す)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -928,7 +988,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -963,9 +1033,11 @@
           {
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る"
             },
             "required": true,
+            "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る",
             "name": "id",
             "in": "path"
           }
@@ -1002,7 +1074,7 @@
             }
           },
           "401": {
-            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける。セッションを作り直す)。WWW-Authenticate がなければ、チャレンジか署名が正しくないか、インストールが使えない (セッションを作り直しても直らない)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1062,7 +1134,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1095,9 +1177,11 @@
           {
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る"
             },
             "required": true,
+            "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る",
             "name": "id",
             "in": "path"
           }
@@ -1117,7 +1201,7 @@
             }
           },
           "401": {
-            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける。セッションを作り直す)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1167,7 +1251,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1202,9 +1296,11 @@
           {
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "format": "uuid",
+              "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る"
             },
             "required": true,
+            "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る",
             "name": "id",
             "in": "path"
           }
@@ -1241,7 +1337,7 @@
             }
           },
           "401": {
-            "description": "セッションがない、または使えない (WWW-Authenticate を付ける)",
+            "description": "セッションがない、または使えない (WWW-Authenticate を付ける。セッションを作り直す)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1291,7 +1387,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1364,7 +1470,17 @@
             }
           },
           "409": {
-            "description": "同じイベントを送っている途中 (Retry-After の秒数を待ってやり直す)",
+            "description": "同じイベントを送っている途中",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1404,7 +1520,17 @@
             }
           },
           "429": {
-            "description": "回数の制限を超えた (Retry-After の秒数を待つ)",
+            "description": "回数の制限を超えた",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1424,7 +1550,17 @@
             }
           },
           "503": {
-            "description": "送れなかった (Retry-After の秒数を待ってやり直す)",
+            "description": "送れなかった",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {

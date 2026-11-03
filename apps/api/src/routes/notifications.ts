@@ -24,7 +24,7 @@ import type { PushGateway, PushOutcome } from "../notifications/push";
 import { ProblemError } from "../problem";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
 import { enforceRateLimit } from "../security/rate-limit";
-import { commonProblems, problemResponse } from "./openapi";
+import { commonProblems, problemResponse, retryableProblemResponse } from "./openapi";
 
 // 利用者の Worker からイベントを受け付け、そのアカウントの端末へ送る (設計書 §4、API-003、ADR-0009)。
 // 送り先のアカウントは、中継の資格情報だけで決める。本文で、アカウント、X の ID、トークン、文、URL を受けない。
@@ -61,8 +61,9 @@ const EventSchema = z
       .regex(/^[1-9][0-9]{0,18}$/)
       .optional()
       .openapi({ description: "ツイートの ID。follow 以外では要り、follow では送らない" }),
-    // UTC (末尾が Z) だけを受ける。
-    occurred_at: z.iso.datetime(),
+    occurred_at: z.iso
+      .datetime()
+      .openapi({ description: "イベントが起きた時刻。UTC (末尾が Z) で送る" }),
   })
   .openapi("RelayEvent");
 
@@ -95,8 +96,8 @@ const route = createRoute({
       },
     },
     401: problemResponse("中継の資格情報がない、または使えない (やり直さない)"),
-    409: problemResponse("同じイベントを送っている途中 (Retry-After の秒数を待ってやり直す)"),
-    503: problemResponse("送れなかった (Retry-After の秒数を待ってやり直す)"),
+    409: retryableProblemResponse("同じイベントを送っている途中"),
+    503: retryableProblemResponse("送れなかった"),
     ...commonProblems,
   },
 });
