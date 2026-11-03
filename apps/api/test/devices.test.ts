@@ -345,48 +345,39 @@ describe("端末の登録の攻撃と制限", () => {
     await putDevice(app, victim, { apnsToken: victimToken });
     await confirm(app, victim.enrolled, pushes[0]?.code ?? "");
     const victimDevices = await activeDeviceIds(victim.enrolled);
-    const attacker = await enrollNewDevice();
-    const attackerToken = newApnsToken();
+    // 入り交じり方は時間で決まるので、このテストは入り交じったときの振る舞いの確かめにとどまる。記録を送る先のトークンで置くことは、
+    // DB のテスト (test/db/devices.test.ts の「記録は、送る先のトークンが今の端末のトークンで…」) が、時間によらず確かめる。
 
-    // 署名した 2 つの要求を先に作り、同じ tick で送る (端末の行の書き換えと、確かめの記録を置くのが入り交じるように)。
-    const signedPut = async (input: DeviceInput) => {
-      const challenge = await issueTestChallenge("device");
-      const signature = await attacker.device.sign(
-        deviceMessage(challenge, attacker.enrolled.installation_id, {
-          apnsEnvironment: "sandbox",
-          topic: TOPIC,
-          apnsToken: input.apnsToken,
-          enabled: input.enabled,
-        }),
-      );
-      return () => putDevice(app, attacker, input, { challenge, signature });
-    };
-    for (let round = 0; round < 6; round++) {
+    // 回ごとに攻撃する人を作り直す (インストールごとの登録の制限に、回をまたいで届かないように)。
+    for (let round = 0; round < 3; round++) {
+      const attacker = await enrollNewDevice();
+      const attackerToken = newApnsToken();
+      // 署名した 2 つの要求を先に作り、同じ tick で送る (端末の行の書き換えと、確かめの記録を置くのが入り交じるように)。
+      const signedPut = async (input: DeviceInput) => {
+        const challenge = await issueTestChallenge("device");
+        const signature = await attacker.device.sign(
+          deviceMessage(challenge, attacker.enrolled.installation_id, {
+            apnsEnvironment: "sandbox",
+            topic: TOPIC,
+            apnsToken: input.apnsToken,
+            enabled: input.enabled,
+          }),
+        );
+        return () => putDevice(app, attacker, input, { challenge, signature });
+      };
       const requests = [
         await signedPut({ apnsToken: attackerToken, enabled: false }),
         await signedPut({ apnsToken: victimToken }),
       ];
       const sent = pushes.length;
-      await Promise.all(requests.map((send) => send()));
+      const responses = await Promise.all(requests.map((send) => send()));
+      expect(responses.map((response) => response.status)).toEqual([200, 200]);
       // 攻撃する側が受け取れるのは、自分の端末 (attackerToken) へ届いた code だけ。届いたらすぐに返す。
       for (const push of pushes.slice(sent).filter((push) => push.apnsToken === attackerToken)) {
         await confirm(app, attacker.enrolled, push.code);
       }
       expect(await activeDeviceIds(victim.enrolled), `round ${round}`).toEqual(victimDevices);
     }
-
-    expect(await activeDeviceIds(victim.enrolled)).toEqual(victimDevices);
-    const row = await env.DB.prepare(
-      "SELECT token_fingerprint, verified_at FROM devices WHERE installation_id = ?",
-    )
-      .bind(attacker.enrolled.installation_id)
-      .first<{ token_fingerprint: string; verified_at: number | null }>();
-    const victimRow = await env.DB.prepare("SELECT token_fingerprint FROM devices WHERE id = ?")
-      .bind(victimDevices[0])
-      .first<{ token_fingerprint: string }>();
-    // 攻撃する側の行が被害者のトークンなら、確かめていない。
-    if (row?.token_fingerprint === victimRow?.token_fingerprint)
-      expect(row?.verified_at).toBeNull();
   });
 
   it("環境を入れ替えると、確かめ直すまで送らず、その環境へ push を送る", async () => {
@@ -497,6 +488,26 @@ describe("端末の登録の攻撃と制限", () => {
   });
 });
 
+describe("端末の確かめの push の枠", () => {
+  it("トークンへの push の枠が埋まっていても、持ち主の登録し直しで、届いている code を消さない", async () => {
+    const { app, pushes } = appWithPushes();
+    const owner = await enrollNewDevice();
+    const apnsToken = newApnsToken();
+    await putDevice(app, owner, { apnsToken });
+    const delivered = pushes[0]?.code ?? "";
+    await expectLimitReached(9, async () => {
+      const response = await putDevice(app, await enrollNewDevice(), { apnsToken });
+      return (await response.json<DeviceResult>()).verification_sent ? "passed" : "limited";
+    });
+
+    const again = await (await putDevice(app, owner, { apnsToken })).json<DeviceResult>();
+
+    // 区切りをまたいで枠が空いたときは、新しい code を送り、それで確かめる。
+    const code = again.verification_sent ? (pushes.at(-1)?.code ?? "") : delivered;
+    expect((await confirm(app, owner.enrolled, code)).status).toBe(200);
+  });
+});
+
 describe("端末の通知を止める", () => {
   it("止めると送り先から外れ、トークンを登録し直しても止めたまま。enabled: true で戻す", async () => {
     const { app, pushes } = appWithPushes();
@@ -517,6 +528,17 @@ describe("端末の通知を止める", () => {
       verified: true,
     });
     expect(await activeDeviceIds(owner.enrolled)).toHaveLength(1);
+  });
+
+  it("止めるのは、インストールごとに数える", async () => {
+    const { app } = appWithPushes();
+    const owner = await enrollNewDevice();
+    await putDevice(app, owner, { apnsToken: newApnsToken() });
+    const path = `/v1/devices/${owner.enrolled.installation_id}`;
+
+    await expectLimitReached(5, async () =>
+      outcomeOf((await request(app, "DELETE", path, owner.enrolled.session.token)).status, 204),
+    );
   });
 
   it("端末がない、セッションがないときは、止められない", async () => {

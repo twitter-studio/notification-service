@@ -155,6 +155,36 @@ export async function createDeviceVerification(
   return row !== null;
 }
 
+/**
+ * 端末の行が今このトークン (指紋、環境、topic) で、まだ確かめていないか。確かめの push を送る前に、回数の枠を使うかを決めるのに
+ * 使う (送らないときに、枠を使わず、届いている code の記録も置き換えない)。置くときは `createDeviceVerification` が見直す。
+ */
+export async function deviceAwaitsVerification(
+  db: Db,
+  input: {
+    accountId: string;
+    deviceId: string;
+    tokenFingerprint: DeviceTokenFingerprint;
+    apnsEnvironment: ApnsEnvironment;
+    topic: string;
+  },
+): Promise<boolean> {
+  const row = await db.$client
+    .prepare(`
+      SELECT 1 AS awaiting FROM devices
+      WHERE id = ?2 AND installation_id IN (${ACTIVE_INSTALLATIONS_OF_ACCOUNT})
+        AND token_fingerprint = ?3 AND apns_environment = ?4 AND topic = ?5 AND verified_at IS NULL`)
+    .bind(
+      input.accountId,
+      input.deviceId,
+      input.tokenFingerprint,
+      input.apnsEnvironment,
+      input.topic,
+    )
+    .first<{ awaiting: number }>();
+  return row !== null;
+}
+
 /** 期限を過ぎた確かめの記録を、`limit` 件まで消し、消した数を返す (定期の掃除で使う)。 */
 export async function deleteExpiredDeviceVerifications(
   db: Db,

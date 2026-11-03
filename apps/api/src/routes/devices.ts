@@ -2,6 +2,7 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   createDb,
   createDeviceVerification,
+  deviceAwaitsVerification,
   disableDeviceByUser,
   enableDeviceByUser,
   findActiveInstallation,
@@ -226,27 +227,31 @@ export function registerDevices(
     if (body.enabled === true) await enableDeviceByUser(db, owner, now);
     if (body.enabled === false) await disableDeviceByUser(db, owner, now);
 
-    // 確かめの記録は、push を送るトークン (この要求の値) で置く。端末の行がもうほかのトークンに変わっていたら置かず、送らない。
-    const code = newBearerToken("verification");
-    const created = await createDeviceVerification(
-      db,
-      {
-        ...owner,
-        codeHash: await hashBearerToken(code),
-        expiresAt: new Date(now.getTime() + DEVICE_VERIFICATION_TTL_MS),
-        tokenFingerprint: sealed.fingerprint,
-        apnsEnvironment: body.apns_environment,
-        topic: body.topic,
-      },
-      now,
-    );
+    // 確かめの push を送るのは、端末の行が今このトークンで、まだ確かめていないときだけ。
     // 確かめの push は、トークンを知っていればどのアカウントからでも送らせられるので、送るときだけトークンごとにも数える。
-    // 超えたら送らず、登録は通す (ほかの人に、持ち主の登録を 429 にさせない)。
+    // 超えたら送らず、登録は通す (ほかの人に、持ち主の登録を 429 にさせない)。届いている code の記録も置き換えない。
+    const target = {
+      ...owner,
+      tokenFingerprint: sealed.fingerprint,
+      apnsEnvironment: body.apns_environment,
+      topic: body.topic,
+    };
+    const code = newBearerToken("verification");
     const verificationSent =
-      created &&
+      (await deviceAwaitsVerification(db, target)) &&
       (await isWithinRateLimit(
         c.env.TOKEN_RATE_LIMITER,
         `device-token:${await rateLimitKeyOf(sealed.fingerprint)}`,
+      )) &&
+      // 記録は push を送るトークン (この要求の値) で置く。間に行がほかのトークンに変わっていたら置かず、送らない。
+      (await createDeviceVerification(
+        db,
+        {
+          ...target,
+          codeHash: await hashBearerToken(code),
+          expiresAt: new Date(now.getTime() + DEVICE_VERIFICATION_TTL_MS),
+        },
+        now,
       )) &&
       (await sendVerification({
         deviceId: registration.deviceId,
