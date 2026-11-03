@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { createDb, revokeRelayCredential } from "@notification-service/db";
+import { createDb, revokeInstallation, revokeRelayCredential } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app";
 import { requireRelayCredential } from "../src/middleware/relay";
@@ -36,7 +36,7 @@ describe("中継の資格情報の確かめ", () => {
     expect(row?.last_used_at).not.toBeNull();
   });
 
-  it("ない、形が違う、セッションのトークン、知らない、取り消した、期限切れ、止めたアカウントのものは 401", async () => {
+  it("ない、形が違う、セッションのトークン、知らない、取り消した、期限切れ、取り消したインストール、止めたアカウントのものは 401", async () => {
     const valid = await enrollNewDevice();
     const revoked = await enrollNewDevice();
     await revokeRelayCredential(createDb(env.DB), {
@@ -47,6 +47,11 @@ describe("中継の資格情報の確かめ", () => {
     await env.DB.prepare("UPDATE relay_credentials SET expires_at = ? WHERE id = ?")
       .bind(Date.now() - 1, expired.enrolled.relay_credential_id)
       .run();
+    const revokedInstallation = await enrollNewDevice();
+    await revokeInstallation(createDb(env.DB), {
+      accountId: revokedInstallation.enrolled.account_id,
+      installationId: revokedInstallation.enrolled.installation_id,
+    });
     const disabled = await enrollNewDevice();
     await env.DB.prepare("UPDATE notification_accounts SET state = 'disabled' WHERE id = ?")
       .bind(disabled.enrolled.account_id)
@@ -60,6 +65,7 @@ describe("中継の資格情報の確かめ", () => {
       `Bearer tsr_${"A".repeat(43)}`,
       `Bearer ${revoked.enrolled.relay_secret}`,
       `Bearer ${expired.enrolled.relay_secret}`,
+      `Bearer ${revokedInstallation.enrolled.relay_secret}`,
       `Bearer ${disabled.enrolled.relay_secret}`,
     ]) {
       const response = await requestWith(authorization);

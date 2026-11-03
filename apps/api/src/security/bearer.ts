@@ -1,3 +1,4 @@
+import type { BearerTokenHash } from "@notification-service/db";
 import { toBase64Url } from "./encoding";
 
 // セッションと中継の資格情報 (高エントロピーの bearer)。DB にはハッシュだけを置き、平文は作ったときに 1 回だけ返す (ADR-0006)。
@@ -11,10 +12,11 @@ export function newBearerToken(kind: BearerKind): string {
   return `${PREFIX[kind]}${toBase64Url(crypto.getRandomValues(new Uint8Array(32)))}`;
 }
 
-export async function hashBearerToken(token: string): Promise<string> {
+/** トークンのハッシュ (SHA-256 の Base64URL、43 文字)。DB に置くのは、これだけ。 */
+export async function hashBearerToken(token: string): Promise<BearerTokenHash> {
   return toBase64Url(
     new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token))),
-  );
+  ) as BearerTokenHash;
 }
 
 /** 2 つの文字列が同じか、かかる時間で中身を探られない形で比べる (ハッシュにそろえてから比べる)。 */

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import {
   type ApnsEnvironment,
+  type BearerTokenHash,
   createDb,
   type Db,
   type DeviceRegistrationResult,
@@ -14,6 +15,15 @@ import {
 /** テストごとに違う値。テストの D1 はテストどうしで空にならないので、ID、ハッシュ、トークンがぶつからないようにする。 */
 export function unique(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+/** テストのトークンのハッシュ (DB の CHECK に合う 43 文字の Base64URL)。テストごとに違う値にする。 */
+export function testHash(): BearerTokenHash {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "") as BearerTokenHash;
 }
 
 export function testDb(): Db {
@@ -32,7 +42,7 @@ export function consumedChallenge() {
 export async function newAccount(db: Db) {
   return enrollInstallation(db, {
     publicKey: unique("public-key"),
-    relaySecretHash: unique("secret-hash"),
+    relaySecretHash: testHash(),
     challenge: consumedChallenge(),
   });
 }

@@ -18,11 +18,12 @@ import {
   cleanupExpiredAuthRecords,
 } from "../src/maintenance";
 import { CLOCK_SKEW_MS } from "../src/security/challenge";
+import { testHash } from "./db/helpers";
 
 async function newAccount() {
   return enrollInstallation(createDb(env.DB), {
     publicKey: `key-${crypto.randomUUID()}`,
-    relaySecretHash: `hash-${crypto.randomUUID()}`,
+    relaySecretHash: testHash(),
     challenge: { nonce: `nonce-${crypto.randomUUID()}`, expiresAt: new Date(Date.now() + 60_000) },
   });
 }
@@ -136,7 +137,7 @@ it("チャレンジかセッションのどちらかの表が区切りの件数�
         accountId: account.accountId,
         installationId: account.installationId,
         challenge: { nonce: `nonce-${crypto.randomUUID()}`, expiresAt: past },
-        session: { tokenHash: `hash-${crypto.randomUUID()}`, expiresAt: past },
+        session: { tokenHash: testHash(), expiresAt: past },
       },
       past,
     );

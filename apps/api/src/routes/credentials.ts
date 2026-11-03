@@ -94,15 +94,16 @@ export function registerRelayCredentials(app: OpenAPIHono<AppEnv>) {
         body.signature,
       ));
     if (!verified) throw new ProblemError(401, "Unauthorized", "The signature is invalid.");
+    // 署名を確かめた後に数える。取り消しの入口 (セッションだけで呼べる) とは別の単位にし、漏れたセッションで枠を使わせない。
     await enforceRateLimit(
       c.env.INSTALLATION_RATE_LIMITER,
-      `relay-credential:${session.installationId}`,
+      `relay-credential-rotate:${session.installationId}`,
     );
 
     const relaySecret = newBearerToken("relay");
-    let credentialId: string | undefined;
+    let rotation: Awaited<ReturnType<typeof rotateRelayCredential>>;
     try {
-      credentialId = await rotateRelayCredential(
+      rotation = await rotateRelayCredential(
         db,
         {
           accountId: session.accountId,
@@ -117,17 +118,22 @@ export function registerRelayCredentials(app: OpenAPIHono<AppEnv>) {
         throw new ProblemError(409, "Conflict", "The challenge has already been used.");
       throw error;
     }
-    if (credentialId === undefined)
-      throw new ProblemError(401, "Unauthorized", "The installation is not active.");
-    return c.json({ relay_credential_id: credentialId, relay_secret: relaySecret }, 201);
+    if (rotation.kind === "rejected") {
+      // インストールがまだ有効なら、1 時間に作れる数を超えた。
+      if ((await findActiveInstallation(db, session.installationId)) === undefined)
+        throw new ProblemError(401, "Unauthorized", "The installation is not active.");
+      throw new ProblemError(429, "Too Many Requests", undefined, { "Retry-After": "3600" });
+    }
+    return c.json({ relay_credential_id: rotation.credentialId, relay_secret: relaySecret }, 201);
   });
 
   app.openapi(revokeRoute, async (c) => {
     const session = c.get("session");
     const { id } = c.req.valid("param");
+    // 入れ替えとは別の単位で数える (ここを使い切られても、持ち主は入れ替えで前のものを取り消せる)。
     await enforceRateLimit(
       c.env.INSTALLATION_RATE_LIMITER,
-      `relay-credential:${session.installationId}`,
+      `relay-credential-revoke:${session.installationId}`,
     );
     const revoked = await revokeRelayCredential(createDb(c.env.DB), {
       accountId: session.accountId,

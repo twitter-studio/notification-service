@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, ne } from "drizzle-orm";
 import type { Db } from "./db";
 import { installationsOf } from "./devices";
 import {
@@ -12,7 +12,8 @@ import {
 
 /**
  * インストールを取り消す (鍵をなくしたときのリセットなど)。端末の行も消し、持っていたトークンを手放す。
- * ほかのアカウントのもの、取り消し済みのものなら false。
+ * アカウントの中継の資格情報も取り消す。v1 のアカウントはインストールを 1 つだけ持ち、取り消した後は、持ち主が資格情報を
+ * 取り消す手段 (セッション) を持てないため (ADR-0007)。ほかのアカウントのもの、取り消し済みのものなら false。
  */
 export async function revokeInstallation(
   db: Db,
@@ -24,7 +25,7 @@ export async function revokeInstallation(
     eq(installations.accountId, input.accountId),
     isNull(installations.revokedAt),
   );
-  const [, , revoked] = await db.batch([
+  const [, , , revoked] = await db.batch([
     db
       .delete(sessions)
       .where(
@@ -45,6 +46,16 @@ export async function revokeInstallation(
             devices.installationId,
             db.select({ id: installations.id }).from(installations).where(owned),
           ),
+        ),
+      ),
+    db
+      .update(relayCredentials)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(relayCredentials.accountId, input.accountId),
+          isNull(relayCredentials.revokedAt),
+          exists(db.select({ id: installations.id }).from(installations).where(owned)),
         ),
       ),
     db

@@ -7,7 +7,7 @@ import {
   revokeInstallation,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
-import { newAccount, registerToken, registerVerified, testDb, unique } from "./helpers";
+import { newAccount, registerToken, registerVerified, testDb, testHash, unique } from "./helpers";
 
 async function count(table: string, column: string, value: string) {
   const row = await env.DB.prepare(`SELECT count(*) AS count FROM ${table} WHERE ${column} = ?`)
@@ -50,7 +50,7 @@ describe("インストールの取り消しと、アカウントの削除", () =
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
-    const aliceHash = unique("hash");
+    const aliceHash = testHash();
     await env.DB.prepare(
       "INSERT INTO relay_credentials (id, account_id, secret_hash) VALUES (?, ?, ?)",
     )

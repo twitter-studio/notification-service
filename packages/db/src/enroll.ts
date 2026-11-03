@@ -9,6 +9,7 @@ import {
   sessions,
   usedChallenges,
 } from "./schema";
+import type { BearerTokenHash } from "./types";
 
 /**
  * 中継の資格情報の ID は、新しく作ったときだけ返す。やり直しで既存のものを返したときは、資格情報を作り直すかを
@@ -24,13 +25,13 @@ export type Enrollment =
  * 公開鍵を持っていることは、呼ぶ側 (AUTH-001) が署名で確かめてから呼ぶ。
  */
 export type ConsumedChallenge = { nonce: string; expiresAt: Date };
-export type NewSession = { tokenHash: string; expiresAt: Date };
+export type NewSession = { tokenHash: BearerTokenHash; expiresAt: Date };
 
 export async function enrollInstallation(
   db: Db,
   input: {
     publicKey: string;
-    relaySecretHash: string;
+    relaySecretHash: BearerTokenHash;
     /** 署名に使ったチャレンジ。バッチの先頭で使ったものとして記録し、同じチャレンジの 2 回目は UNIQUE で失敗する。 */
     challenge: ConsumedChallenge;
     /** 一緒に作るセッション。 */

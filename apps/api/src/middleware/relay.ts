@@ -26,11 +26,25 @@ export const requireRelayCredential = createMiddleware<RelayEnv>(async (c, next)
     c.header("WWW-Authenticate", 'Bearer realm="notification-service"');
     return problem(c, 401, "Unauthorized");
   }
-  // 利用者が使っていない資格情報を見つけられるよう、使った時刻を残す (1 時間に 1 回まで書く)。
-  await markRelayCredentialUsed(db, {
+  // 使っていない資格情報を見つけられるよう、使った時刻を残す (1 時間に 1 回まで書く)。応答を待たせず、失敗しても中継は通す。
+  const marking = markRelayCredentialUsed(db, {
     accountId: credential.accountId,
     credentialId: credential.id,
+  }).catch((error: unknown) => {
+    console.error(
+      JSON.stringify({
+        event: "relay_credential_mark_used_failed",
+        request_id: c.get("requestId"),
+        name: error instanceof Error ? error.name : "unknown",
+      }),
+    );
   });
+  try {
+    c.executionCtx.waitUntil(marking);
+  } catch {
+    // 実行の文脈のない呼び出し (テストの app.request) では、待ってから進む。
+    await marking;
+  }
   c.set("relayCredential", credential);
   await next();
 });

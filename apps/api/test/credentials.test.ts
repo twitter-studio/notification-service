@@ -1,8 +1,14 @@
 import { env } from "cloudflare:workers";
-import { createDb, findActiveRelayCredential, revokeInstallation } from "@notification-service/db";
+import {
+  createDb,
+  findActiveRelayCredential,
+  MAX_RELAY_CREDENTIALS_PER_HOUR,
+  revokeInstallation,
+} from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import { hashBearerToken } from "../src/security/bearer";
 import { relayCredentialMessage, sessionMessage } from "../src/security/installation-key";
+import { testHash } from "./db/helpers";
 import {
   call,
   type DeviceKey,
@@ -124,6 +130,82 @@ describe("中継の資格情報の入れ替え", () => {
 
     expect(response.status).toBe(201);
     expect(await activeAccountOf(bob.enrolled.relay_secret)).toBe(bob.enrolled.account_id);
+  });
+
+  it("同時に入れ替えても、使える資格情報は 1 つだけ", async () => {
+    const { device, enrolled } = await enrollNewDevice();
+
+    const responses = await Promise.all([rotate(device, enrolled), rotate(device, enrolled)]);
+
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const rows = await env.DB.prepare(
+      "SELECT count(*) AS count FROM relay_credentials WHERE account_id = ? AND revoked_at IS NULL",
+    )
+      .bind(enrolled.account_id)
+      .first<{ count: number }>();
+    expect(rows?.count).toBe(1);
+  });
+
+  it("署名が違うときはチャレンジを使ったことにせず、正しい署名なら同じチャレンジで入れ替えられる", async () => {
+    const { device, enrolled } = await enrollNewDevice();
+    const challenge = await issueTestChallenge("relay_credential");
+    await expectProblem(
+      await rotate(device, enrolled, { challenge, signature: await device.sign("other") }),
+      401,
+    );
+
+    expect((await rotate(device, enrolled, { challenge })).status).toBe(201);
+  });
+
+  it("中継の資格情報をセッションとして出しても、入れ替えられない", async () => {
+    const { device, enrolled } = await enrollNewDevice();
+
+    await expectProblem(
+      await rotate(device, enrolled, { token: enrolled.relay_secret ?? "" }),
+      401,
+    );
+  });
+
+  it("DB には新しい秘密の平文を置かない", async () => {
+    const { device, enrolled } = await enrollNewDevice();
+    const body = await (await rotate(device, enrolled)).json<Rotated>();
+
+    const row = await env.DB.prepare(
+      "SELECT count(*) AS count FROM relay_credentials WHERE secret_hash = ? OR secret_hash = ?",
+    )
+      .bind(body.relay_secret, body.relay_secret.slice(4))
+      .first<{ count: number }>();
+    expect(row?.count).toBe(0);
+    expect(await activeAccountOf(body.relay_secret)).toBe(enrolled.account_id);
+  });
+
+  it("1 時間に作れる数を超えると 429 で、前の資格情報を残す", async () => {
+    const { device, enrolled } = await enrollNewDevice();
+    // 登録の 1 つと合わせて、上限の 1 つ手前まで作った形にする。
+    const filler = Array.from({ length: MAX_RELAY_CREDENTIALS_PER_HOUR - 2 }, () =>
+      env.DB.prepare(
+        "INSERT INTO relay_credentials (id, account_id, secret_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?)",
+      ).bind(crypto.randomUUID(), enrolled.account_id, testHash(), Date.now(), Date.now()),
+    );
+    await env.DB.batch(filler);
+    const last = await (await rotate(device, enrolled)).json<Rotated>();
+
+    const response = await rotate(device, enrolled);
+
+    expect(response.headers.get("Retry-After")).toBe("3600");
+    await expectProblem(response, 429);
+    expect(await activeAccountOf(last.relay_secret)).toBe(enrolled.account_id);
+  });
+
+  it("取り消しの入口を使い切られても、入れ替えはできる", async () => {
+    const { device, enrolled } = await enrollNewDevice();
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await call("DELETE", `/v1/relay-credentials/${crypto.randomUUID()}`, {
+        token: enrolled.session.token,
+      });
+    }
+
+    expect((await rotate(device, enrolled)).status).toBe(201);
   });
 
   it("入れ替えすぎると 429", async () => {

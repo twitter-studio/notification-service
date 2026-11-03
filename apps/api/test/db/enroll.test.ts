@@ -5,12 +5,12 @@ import {
   isUniqueViolation,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
-import { consumedChallenge, testDb, unique } from "./helpers";
+import { consumedChallenge, testDb, testHash, unique } from "./helpers";
 
 describe("登録 (アカウント、インストール、中継の資格情報)", () => {
   it("アカウントは X の ID と関係のない UUID で、インストールと資格情報と一緒に作る", async () => {
     const db = testDb();
-    const secretHash = unique("hash");
+    const secretHash = testHash();
 
     const enrolled = await enrollInstallation(db, {
       publicKey: unique("key"),
@@ -30,13 +30,13 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
     const publicKey = unique("key");
     const first = await enrollInstallation(db, {
       publicKey,
-      relaySecretHash: unique("hash"),
+      relaySecretHash: testHash(),
       challenge: consumedChallenge(),
     });
 
     const retried = await enrollInstallation(db, {
       publicKey,
-      relaySecretHash: unique("hash"),
+      relaySecretHash: testHash(),
       challenge: consumedChallenge(),
     });
 
@@ -49,7 +49,7 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
 
   it("途中で失敗したら、アカウントもインストールも残さない", async () => {
     const db = testDb();
-    const takenHash = unique("hash");
+    const takenHash = testHash();
     await enrollInstallation(db, {
       publicKey: unique("key"),
       relaySecretHash: takenHash,
@@ -76,7 +76,7 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
   it("1 つのアカウントに、有効なインストールは 1 つだけ", async () => {
     const enrolled = await enrollInstallation(testDb(), {
       publicKey: unique("key"),
-      relaySecretHash: unique("hash"),
+      relaySecretHash: testHash(),
       challenge: consumedChallenge(),
     });
 
@@ -92,7 +92,7 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
     const publicKey = unique("key");
     const first = await enrollInstallation(db, {
       publicKey,
-      relaySecretHash: unique("hash"),
+      relaySecretHash: testHash(),
       challenge: consumedChallenge(),
     });
     await env.DB.prepare("UPDATE notification_accounts SET state = 'disabled' WHERE id = ?")
@@ -102,7 +102,7 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
     await expect(
       enrollInstallation(db, {
         publicKey,
-        relaySecretHash: unique("hash"),
+        relaySecretHash: testHash(),
         challenge: consumedChallenge(),
       }),
     ).rejects.toSatisfy((error) => isUniqueViolation(error, "installations.public_key"));

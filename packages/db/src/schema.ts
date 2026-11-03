@@ -113,7 +113,12 @@ export const relayCredentials = sqliteTable(
     revokedAt: timestamp("revoked_at"),
     lastUsedAt: timestamp("last_used_at"),
   },
-  (t) => [index("idx_relay_credentials_account").on(t.accountId)],
+  (t) => [
+    index("idx_relay_credentials_account").on(t.accountId, t.createdAt),
+    index("idx_relay_credentials_revoked").on(t.revokedAt),
+    // SHA-256 の Base64URL (43 文字) だけを置く。平文のトークン (`tsr_` と 43 文字) を置かせない。
+    check("relay_credentials_secret_hash", sql`length(${t.secretHash}) = 43`),
+  ],
 );
 
 export const deliveryDedup = sqliteTable(
@@ -162,6 +167,8 @@ export const sessions = sqliteTable(
     revokedAt: timestamp("revoked_at"),
   },
   (t) => [
+    // SHA-256 の Base64URL (43 文字) だけを置く。平文のトークン (`tss_` と 43 文字) を置かせない。
+    check("sessions_token_hash", sql`length(${t.tokenHash}) = 43`),
     index("idx_sessions_account").on(t.accountId),
     // インストールの取り消しと、インストールごとのセッションの数の上限 (新しい順に残す) で引く。
     index("idx_sessions_installation").on(t.installationId, t.createdAt),
