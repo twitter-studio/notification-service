@@ -160,10 +160,17 @@ export const deliveryDedup = sqliteTable(
       .references(() => notificationAccounts.id),
     eventId: text("event_id").notNull(),
     acceptedAt: timestamp("accepted_at").notNull().default(now),
+    // 送る処理の途中 (processing) か、済んだ (done) か。処理中のやり直しを、済んだ重複と分けて答えるため (ADR-0009)。
+    state: text("state", { enum: ["processing", "done"] })
+      .notNull()
+      .default("processing"),
+    // 状態を最後に書いた時刻。処理中のまま止まった記録 (Worker が途中で落ちた) を、やり直しで引き継ぐのに使う。
+    updatedAt: timestamp("updated_at").notNull().default(now),
   },
   (t) => [
     primaryKey({ columns: [t.accountId, t.eventId] }),
     index("idx_delivery_dedup_accepted").on(t.acceptedAt),
+    check("delivery_dedup_state", sql`${t.state} IN ('processing', 'done')`),
   ],
 );
 

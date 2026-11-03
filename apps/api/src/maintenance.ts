@@ -10,9 +10,12 @@ import { CLOCK_SKEW_MS } from "./security/challenge";
 /**
  * 受け付けの記録 (重複の除去) を残す期間。送り手 (利用者の Worker) がやり直す期間より長くする。
  * 短くすると、遅れて届いたやり直しを、新しいイベントとして 2 回送ってしまうため。
- * これより古いイベントは、受け付けるときに、イベントの時刻の新しさで拒む (API-003、ADR-0005)。
+ * これより古いイベントは、受け付けるときに、イベントの時刻の新しさで拒む (ADR-0005、ADR-0009)。
  */
 export const ACCEPTED_EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** 定期の掃除の間隔 (wrangler.jsonc の Cron、1 日 1 回)。受け付けるイベントの古さの上限を決めるのに使う。 */
+export const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** 取り消した中継の資格情報を残す期間。入れ替えの上限 (1 時間あたり) を数えるのに使うので、それより長くする。 */
 export const REVOKED_RELAY_CREDENTIAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;

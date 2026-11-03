@@ -2,8 +2,11 @@ CREATE TABLE `delivery_dedup` (
 	`account_id` text NOT NULL,
 	`event_id` text NOT NULL,
 	`accepted_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
+	`state` text DEFAULT 'processing' NOT NULL,
+	`updated_at` integer DEFAULT (CAST(strftime('%s', 'now') AS INTEGER) * 1000) NOT NULL,
 	PRIMARY KEY(`account_id`, `event_id`),
-	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "delivery_dedup_state" CHECK("delivery_dedup"."state" IN ('processing', 'done'))
 );
 --> statement-breakpoint
 CREATE INDEX `idx_delivery_dedup_accepted` ON `delivery_dedup` (`accepted_at`);--> statement-breakpoint

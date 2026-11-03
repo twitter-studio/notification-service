@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "38d766de-7e31-46d7-91b0-4eff1b6a41f6",
+  "id": "28e42b9a-e408-4215-a710-516775095488",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -23,6 +23,22 @@
         },
         "accepted_at": {
           "name": "accepted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'processing'"
+        },
+        "updated_at": {
+          "name": "updated_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -55,7 +71,12 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "delivery_dedup_state": {
+          "name": "delivery_dedup_state",
+          "value": "\"delivery_dedup\".\"state\" IN ('processing', 'done')"
+        }
+      }
     },
     "device_verifications": {
       "name": "device_verifications",

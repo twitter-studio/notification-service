@@ -5,7 +5,8 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
-  acceptEventOnce,
+  beginEvent,
+  completeEvent,
   createDb,
   createSession,
   enrollInstallation,
@@ -44,19 +45,17 @@ it("定期の掃除は、残す期間より古い受け付けの記録だけを�
   const account = await newAccount();
   const scheduledTime = Date.parse("2026-11-10T18:17:00.000Z");
   const cutoff = scheduledTime - ACCEPTED_EVENT_RETENTION_MS;
-  await acceptEventOnce(db, { accountId: account.accountId, eventId: "old" }, new Date(cutoff - 1));
-  await acceptEventOnce(
-    db,
-    { accountId: account.accountId, eventId: "boundary" },
-    new Date(cutoff),
-  );
+  const old = { accountId: account.accountId, eventId: "old" };
+  const boundary = { accountId: account.accountId, eventId: "boundary" };
+  await beginEvent(db, old, new Date(cutoff - 1));
+  await completeEvent(db, old);
+  await beginEvent(db, boundary, new Date(cutoff));
+  await completeEvent(db, boundary);
 
   await runCleanup(scheduledTime);
 
-  expect(await acceptEventOnce(db, { accountId: account.accountId, eventId: "old" })).toBe(true);
-  expect(await acceptEventOnce(db, { accountId: account.accountId, eventId: "boundary" })).toBe(
-    false,
-  );
+  expect((await beginEvent(db, old)).kind).toBe("accepted");
+  expect((await beginEvent(db, boundary)).kind).toBe("done");
 });
 
 it("消す記録が多くても、件数を区切ってくり返し、全部消す", async () => {
