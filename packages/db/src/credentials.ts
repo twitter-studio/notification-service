@@ -1,6 +1,9 @@
 import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
 import type { Db } from "./db";
+import type { ConsumedChallenge } from "./enroll";
 import { notificationAccounts, relayCredentials } from "./schema";
+
+export type ActiveRelayCredential = { id: string; accountId: string };
 
 /** 使った時刻を書き直す間隔。中継のたびに D1 へ書かないよう、これより前に書いたときだけ書き直す。 */
 export const LAST_USED_RESOLUTION_MS = 60 * 60 * 1000;
@@ -25,7 +28,7 @@ export async function findActiveRelayCredential(
   db: Db,
   secretHash: string,
   now = new Date(),
-): Promise<{ id: string; accountId: string } | undefined> {
+): Promise<ActiveRelayCredential | undefined> {
   const rows = await db
     .select({ id: relayCredentials.id, accountId: relayCredentials.accountId })
     .from(relayCredentials)
@@ -40,6 +43,47 @@ export async function findActiveRelayCredential(
     )
     .limit(1);
   return rows[0];
+}
+
+/**
+ * 中継の資格情報を入れ替える。チャレンジを使ったものとして記録し (2 回目は UNIQUE で失敗する)、アカウントの使える資格情報を
+ * すべて取り消して、新しいものを置く (1 つのバッチ)。インストールがそのアカウントの有効なものでなければ、何も変えない。
+ * 置けたら新しい資格情報の ID。端末の鍵の署名は、呼ぶ側が確かめてから呼ぶ。
+ */
+export async function rotateRelayCredential(
+  db: Db,
+  input: {
+    accountId: string;
+    installationId: string;
+    challenge: ConsumedChallenge;
+    secretHash: string;
+  },
+  now = new Date(),
+): Promise<string | undefined> {
+  const id = crypto.randomUUID();
+  // バッチの途中で、インストールの取り消しやアカウントの停止が挟まっても、止めたアカウントに資格情報を作らない。
+  const activeInstallation = `EXISTS (
+    SELECT 1 FROM installations
+    INNER JOIN notification_accounts ON notification_accounts.id = installations.account_id
+    WHERE installations.id = ?2 AND installations.account_id = ?1
+      AND installations.revoked_at IS NULL AND notification_accounts.state = 'active')`;
+  const [, , created] = await db.$client.batch<{ id: string }>([
+    db.$client
+      .prepare("INSERT INTO used_challenges (nonce, expires_at) VALUES (?1, ?2)")
+      .bind(input.challenge.nonce, input.challenge.expiresAt.getTime()),
+    db.$client
+      .prepare(`
+        UPDATE relay_credentials SET revoked_at = ?3
+        WHERE account_id = ?1 AND revoked_at IS NULL AND ${activeInstallation}`)
+      .bind(input.accountId, input.installationId, now.getTime()),
+    db.$client
+      .prepare(`
+        INSERT INTO relay_credentials (id, account_id, secret_hash, created_at)
+        SELECT ?3, ?1, ?4, ?5 WHERE ${activeInstallation}
+        RETURNING id`)
+      .bind(input.accountId, input.installationId, id, input.secretHash, now.getTime()),
+  ]);
+  return created?.results[0]?.id;
 }
 
 /** アカウントの資格情報を取り消す。ほかのアカウントのもの、取り消し済みのものなら false。 */

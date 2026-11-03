@@ -5,10 +5,12 @@ import {
   isUniqueViolation,
   LAST_USED_RESOLUTION_MS,
   markRelayCredentialUsed,
+  revokeInstallation,
   revokeRelayCredential,
+  rotateRelayCredential,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
-import { newAccount, testDb, unique } from "./helpers";
+import { consumedChallenge, newAccount, testDb, unique } from "./helpers";
 
 const now = new Date("2026-11-04T00:00:00.000Z");
 
@@ -138,5 +140,77 @@ describe("中継の資格情報", () => {
       later,
     );
     expect(await lastUsedAt(credential)).toBe(now.getTime());
+  });
+
+  it("入れ替えると、そのアカウントの使える資格情報をすべて取り消し、新しいものだけを残す", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const bob = await newAccount(db);
+    const old = [unique("hash"), unique("hash")];
+    for (const secretHash of old) {
+      await createRelayCredential(db, { accountId: alice.accountId, secretHash });
+    }
+    const bobHash = unique("hash");
+    await createRelayCredential(db, { accountId: bob.accountId, secretHash: bobHash });
+    const newHash = unique("hash");
+
+    const id = await rotateRelayCredential(
+      db,
+      { ...alice, challenge: consumedChallenge(), secretHash: newHash },
+      now,
+    );
+
+    expect(await findActiveRelayCredential(db, newHash, now)).toEqual({
+      id,
+      accountId: alice.accountId,
+    });
+    for (const secretHash of old) {
+      expect(await findActiveRelayCredential(db, secretHash, now)).toBeUndefined();
+    }
+    expect((await findActiveRelayCredential(db, bobHash, now))?.accountId).toBe(bob.accountId);
+  });
+
+  it("ほかのアカウントのインストール、取り消したインストールでは、何も変えない", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const bob = await newAccount(db);
+    const aliceHash = unique("hash");
+    await createRelayCredential(db, { accountId: alice.accountId, secretHash: aliceHash });
+
+    expect(
+      await rotateRelayCredential(
+        db,
+        {
+          accountId: alice.accountId,
+          installationId: bob.installationId,
+          challenge: consumedChallenge(),
+          secretHash: unique("hash"),
+        },
+        now,
+      ),
+    ).toBeUndefined();
+    await revokeInstallation(db, alice);
+    const newHash = unique("hash");
+    expect(
+      await rotateRelayCredential(
+        db,
+        { ...alice, challenge: consumedChallenge(), secretHash: newHash },
+        now,
+      ),
+    ).toBeUndefined();
+
+    expect(await findActiveRelayCredential(db, aliceHash, now)).toBeDefined();
+    expect(await findActiveRelayCredential(db, newHash, now)).toBeUndefined();
+  });
+
+  it("同じチャレンジでは 2 回入れ替えられない", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const challenge = consumedChallenge();
+    await rotateRelayCredential(db, { ...alice, challenge, secretHash: unique("hash") }, now);
+
+    await expect(
+      rotateRelayCredential(db, { ...alice, challenge, secretHash: unique("hash") }, now),
+    ).rejects.toSatisfy((error) => isUniqueViolation(error, "used_challenges.nonce"));
   });
 });

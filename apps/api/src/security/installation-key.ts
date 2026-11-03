@@ -28,6 +28,11 @@ export function sessionMessage(challenge: string, installationId: string): strin
   return ["twitter-studio/session/v1", challenge, installationId].join("\n");
 }
 
+/** 中継の資格情報の入れ替えで署名する文。セッションだけでは入れ替えさせず、端末の鍵を持っていることも求める。 */
+export function relayCredentialMessage(challenge: string, installationId: string): string {
+  return ["twitter-studio/relay-credential/v1", challenge, installationId].join("\n");
+}
+
 /** 署名を確かめる。公開鍵が曲線の上の点でない、署名の形が違うときも false。 */
 export async function verifyInstallationSignature(
   publicKey: Uint8Array<ArrayBuffer>,

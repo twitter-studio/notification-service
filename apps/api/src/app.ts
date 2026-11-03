@@ -1,9 +1,10 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import type { ActiveSession } from "@notification-service/db";
+import type { ActiveRelayCredential, ActiveSession } from "@notification-service/db";
 import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { ProblemError, problem } from "./problem";
+import { registerRelayCredentials } from "./routes/credentials";
 import { registerEnrollment } from "./routes/enrollment";
 import { registerHealth } from "./routes/health";
 
@@ -13,6 +14,12 @@ export type AppEnv = { Bindings: Env; Variables: { requestId: string } };
 export type SessionEnv = {
   Bindings: Env;
   Variables: { requestId: string; session: ActiveSession };
+};
+
+/** `requireRelayCredential` を付けた入口だけで使える `c.get("relayCredential")`。送り先のアカウントは、これだけで決める。 */
+export type RelayEnv = {
+  Bindings: Env;
+  Variables: { requestId: string; relayCredential: ActiveRelayCredential };
 };
 
 /** 本文の大きさの上限 (設計書 §4)。 */
@@ -58,6 +65,7 @@ export function createApp() {
   );
   registerHealth(app);
   registerEnrollment(app);
+  registerRelayCredentials(app);
 
   app.notFound((c) => problem(c, 404, "Not Found"));
   app.onError((error, c) => {
