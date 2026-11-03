@@ -3,8 +3,13 @@ import type { ActiveRelayCredential, ActiveSession } from "@notification-service
 import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
+import {
+  type DeviceVerificationSender,
+  notConfiguredVerificationSender,
+} from "./devices/verification";
 import { ProblemError, problem } from "./problem";
 import { registerRelayCredentials } from "./routes/credentials";
+import { registerDevices } from "./routes/devices";
 import { registerEnrollment } from "./routes/enrollment";
 import { registerHealth } from "./routes/health";
 
@@ -45,7 +50,12 @@ const requestId = createMiddleware<AppEnv>(async (c, next) => {
   c.header("X-Request-Id", id);
 });
 
-export function createApp() {
+export type AppOptions = {
+  /** 端末の確かめの push を送る。APNs へ送る仕組み (APNS-002) ができるまでは、送らない。テストでは差し替える。 */
+  sendDeviceVerification?: DeviceVerificationSender;
+};
+
+export function createApp(options: AppOptions = {}) {
   const app = new OpenAPIHono<AppEnv>({
     // 入力の誤りは 422 の problem+json で返す。どの値がどう違うかは返さない (送られた値を応答に写さないため)。
     defaultHook: (result, c) => {
@@ -66,6 +76,7 @@ export function createApp() {
   registerHealth(app);
   registerEnrollment(app);
   registerRelayCredentials(app);
+  registerDevices(app, options.sendDeviceVerification ?? notConfiguredVerificationSender);
 
   app.notFound((c) => problem(c, 404, "Not Found"));
   app.onError((error, c) => {

@@ -81,7 +81,7 @@ export const devices = sqliteTable(
       .notNull()
       .default("active"),
     // このトークンを持っていることを確かめた時刻。確かめるまで送らない (トークンを知っているだけの人の登録で送らないため)。
-    // トークンが変わったら空に戻す。確かめ方は API-002 で決める。
+    // トークンが変わったら空に戻す。確かめ方は ADR-0008 (確かめの code を push で送り、アプリが返す)。
     verifiedAt: timestamp("verified_at"),
     updatedAt: timestamp("updated_at").notNull().default(now),
   },
@@ -97,6 +97,34 @@ export const devices = sqliteTable(
     check("devices_apns_token_ciphertext", sql`${t.apnsTokenCiphertext} GLOB 'v[0-9]*.*'`),
     check("devices_token_fingerprint", sql`${t.tokenFingerprint} GLOB 'f[0-9]*.*'`),
     check("devices_state", sql`${t.state} IN ('active', 'disabled_by_user', 'invalidated')`),
+  ],
+);
+
+/**
+ * 端末のトークンを持っていることの確かめ (ADR-0008)。確かめの code を push で送り、アプリが返したら、ここの記録と突き合わせて
+ * 確かめたことにする。送ったときのトークン (指紋、環境、topic) を残し、その後にトークンが変わっていたら確かめない。
+ * 端末ごとに 1 つ (送り直したら置き換える)。
+ */
+export const deviceVerifications = sqliteTable(
+  "device_verifications",
+  {
+    deviceId: text("device_id")
+      .primaryKey()
+      .references(() => devices.id),
+    codeHash: text("code_hash").notNull(),
+    tokenFingerprint: text("token_fingerprint").notNull(),
+    apnsEnvironment: text("apns_environment", { enum: ["sandbox", "production"] }).notNull(),
+    topic: text("topic").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("idx_device_verifications_expires").on(t.expiresAt),
+    // code の SHA-256 の Base64URL (43 文字) だけを置く。
+    check(
+      "device_verifications_code_hash",
+      sql`length(${t.codeHash}) = 43 AND ${t.codeHash} NOT GLOB '*[^A-Za-z0-9_-]*'`,
+    ),
   ],
 );
 

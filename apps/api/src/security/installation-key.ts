@@ -28,6 +28,31 @@ export function sessionMessage(challenge: string, installationId: string): strin
   return ["twitter-studio/session/v1", challenge, installationId].join("\n");
 }
 
+/**
+ * 端末 (APNs のトークン) の登録で署名する文。チャレンジ、インストール、環境、topic、トークン (小文字の 16 進数)、通知を
+ * 受け取るか (`true`、`false`、省いたら空) を結び付け、セッションだけで、ほかのトークンや環境、設定に書き換えさせない。
+ */
+export function deviceMessage(
+  challenge: string,
+  installationId: string,
+  device: {
+    apnsEnvironment: string;
+    topic: string;
+    apnsToken: string;
+    enabled?: boolean | undefined;
+  },
+): string {
+  return [
+    "twitter-studio/device/v1",
+    challenge,
+    installationId,
+    device.apnsEnvironment,
+    device.topic,
+    device.apnsToken,
+    device.enabled === undefined ? "" : String(device.enabled),
+  ].join("\n");
+}
+
 /** 中継の資格情報の入れ替えで署名する文。セッションだけでは入れ替えさせず、端末の鍵を持っていることも求める。 */
 export function relayCredentialMessage(challenge: string, installationId: string): string {
   return ["twitter-studio/relay-credential/v1", challenge, installationId].join("\n");

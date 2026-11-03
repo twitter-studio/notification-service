@@ -37,13 +37,15 @@ const challengeRoute = createRoute({
   method: "post",
   path: "/v1/enrollments/challenge",
   summary:
-    "登録、セッションの作り直し、中継の資格情報の入れ替えで、端末の鍵に署名させるチャレンジを出す",
+    "登録、セッションの作り直し、中継の資格情報の入れ替え、端末の登録で、端末の鍵に署名させるチャレンジを出す",
   request: {
     body: {
       required: true,
       content: {
         "application/json": {
-          schema: z.object({ purpose: z.enum(["enroll", "session", "relay_credential"]) }),
+          schema: z.object({
+            purpose: z.enum(["enroll", "session", "relay_credential", "device"]),
+          }),
         },
       },
     },

@@ -1,5 +1,6 @@
 import { exports } from "cloudflare:workers";
 import { expect } from "vitest";
+import type { ChallengePurpose } from "../../src/security/challenge";
 import { enrollmentMessage } from "../../src/security/installation-key";
 import { newDeviceKey } from "./device-key";
 import { jsonHeaders } from "./http";
@@ -32,7 +33,7 @@ export async function call(
   });
 }
 
-export async function issueTestChallenge(purpose: "enroll" | "session" | "relay_credential") {
+export async function issueTestChallenge(purpose: ChallengePurpose) {
   const response = await call("POST", "/v1/enrollments/challenge", { body: { purpose } });
   expect(response.status).toBe(200);
   return (await response.json<{ challenge: string }>()).challenge;

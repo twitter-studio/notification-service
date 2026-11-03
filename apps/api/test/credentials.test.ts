@@ -18,6 +18,7 @@ import {
   issueTestChallenge,
 } from "./helpers/api";
 import { newDeviceKey } from "./helpers/device-key";
+import { expectLimitReached, outcomeOf } from "./helpers/rate-limit";
 
 type Rotated = { relay_credential_id: string; relay_secret: string };
 
@@ -199,26 +200,20 @@ describe("中継の資格情報の入れ替え", () => {
 
   it("取り消しの入口を使い切られても、入れ替えはできる", async () => {
     const { device, enrolled } = await enrollNewDevice();
-    const statuses: number[] = [];
-    for (let attempt = 0; attempt < 6; attempt++) {
+    await expectLimitReached(5, async () => {
       const response = await call("DELETE", `/v1/relay-credentials/${crypto.randomUUID()}`, {
         token: enrolled.session.token,
       });
-      statuses.push(response.status);
-    }
-
-    expect(statuses).toEqual([404, 404, 404, 404, 404, 429]);
+      return outcomeOf(response.status, 404);
+    });
     expect((await rotate(device, enrolled)).status).toBe(201);
   });
 
   it("入れ替えすぎると 429", async () => {
     const { device, enrolled } = await enrollNewDevice();
-    const statuses: number[] = [];
-    for (let attempt = 0; attempt < 6; attempt++) {
-      statuses.push((await rotate(device, enrolled)).status);
-    }
-
-    expect(statuses).toEqual([201, 201, 201, 201, 201, 429]);
+    await expectLimitReached(5, async () =>
+      outcomeOf((await rotate(device, enrolled)).status, 201),
+    );
   });
 });
 

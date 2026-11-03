@@ -3,6 +3,7 @@ import {
   type ApnsEnvironment,
   type BearerTokenHash,
   createDb,
+  createDeviceVerification,
   type Db,
   type DeviceRegistrationResult,
   type DeviceTokenCiphertext,
@@ -61,6 +62,7 @@ export async function registerToken(
   owner: Owner,
   token: string,
   apnsEnvironment: ApnsEnvironment = "sandbox",
+  topic = TOPIC,
 ): Promise<DeviceRegistrationResult> {
   return registerDeviceToken(db, {
     accountId: owner.accountId,
@@ -68,8 +70,43 @@ export async function registerToken(
     apnsTokenCiphertext: ciphertextOf(token),
     tokenFingerprint: fingerprintOf(token),
     apnsEnvironment,
-    topic: TOPIC,
+    topic,
+    challenge: consumedChallenge(),
   });
+}
+
+/**
+ * 端末の今のトークンへ code を送ったものとして確かめの記録を置き、その code のハッシュを返す。置けなければ undefined。
+ * 送る先のトークンを、端末の行から読む (API は要求のトークンを使う。ここでは DB の関数だけを確かめる)。
+ */
+export async function issueVerification(
+  db: Db,
+  owner: Owner,
+  deviceId: string,
+  expiresAt = new Date(Date.now() + 10 * 60 * 1000),
+): Promise<BearerTokenHash | undefined> {
+  const row = await env.DB.prepare(
+    "SELECT token_fingerprint, apns_environment, topic FROM devices WHERE id = ?",
+  )
+    .bind(deviceId)
+    .first<{ token_fingerprint: string; apns_environment: ApnsEnvironment; topic: string }>();
+  const codeHash = testHash();
+  const created = await createDeviceVerification(db, {
+    accountId: owner.accountId,
+    deviceId,
+    codeHash,
+    expiresAt,
+    tokenFingerprint: (row?.token_fingerprint ?? "f1.none") as DeviceTokenFingerprint,
+    apnsEnvironment: row?.apns_environment ?? "sandbox",
+    topic: row?.topic ?? TOPIC,
+  });
+  return created ? codeHash : undefined;
+}
+
+/** 確かめの記録を置いて、アプリが code を返したところまで行う。確かめられたら true。 */
+export async function verifyDevice(db: Db, owner: Owner, deviceId: string): Promise<boolean> {
+  const codeHash = (await issueVerification(db, owner, deviceId)) ?? testHash();
+  return markDeviceVerified(db, { accountId: owner.accountId, deviceId, codeHash });
 }
 
 /** 登録できたときの端末の ID。できなかったらテストを失敗にする。 */
@@ -81,16 +118,6 @@ export function deviceIdOf(result: DeviceRegistrationResult): string {
 /** 登録して、トークンを持っていることを確かめた端末にする (送り先になる)。 */
 export async function registerVerified(db: Db, owner: Owner, token: string): Promise<string> {
   const deviceId = deviceIdOf(await registerToken(db, owner, token));
-  if (
-    !(await markDeviceVerified(db, {
-      accountId: owner.accountId,
-      deviceId,
-      tokenFingerprint: fingerprintOf(token),
-      apnsEnvironment: "sandbox",
-      topic: TOPIC,
-    }))
-  ) {
-    throw new Error("markDeviceVerified failed");
-  }
+  if (!(await verifyDevice(db, owner, deviceId))) throw new Error("verifyDevice failed");
   return deviceId;
 }
