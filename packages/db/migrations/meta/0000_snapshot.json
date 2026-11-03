@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "43a1a02b-93ba-4fd3-b40e-16f6176502df",
+  "id": "855fbfce-7dfd-4f87-a6f8-fe7e154a342c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -27,7 +27,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
         }
       },
       "indexes": {
@@ -44,7 +44,7 @@
           "tableTo": "notification_accounts",
           "columnsFrom": ["account_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -110,13 +110,20 @@
           "autoincrement": false,
           "default": "'active'"
         },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
         }
       },
       "indexes": {
@@ -138,7 +145,7 @@
           "tableTo": "installations",
           "columnsFrom": ["installation_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -193,7 +200,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
         },
         "revoked_at": {
           "name": "revoked_at",
@@ -228,13 +235,18 @@
           "tableTo": "notification_accounts",
           "columnsFrom": ["account_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "installations_attestation_state": {
+          "name": "installations_attestation_state",
+          "value": "\"installations\".\"attestation_state\" IN ('pending', 'verified', 'not_supported')"
+        }
+      }
     },
     "notification_accounts": {
       "name": "notification_accounts",
@@ -260,7 +272,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
         },
         "deleted_at": {
           "name": "deleted_at",
@@ -311,7 +323,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "(CAST(unixepoch('subsec') * 1000 AS INTEGER))"
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
         },
         "expires_at": {
           "name": "expires_at",
@@ -354,7 +366,7 @@
           "tableTo": "notification_accounts",
           "columnsFrom": ["account_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },

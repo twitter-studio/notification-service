@@ -1,3 +1,4 @@
+export * from "./account";
 export * from "./credentials";
 export { createDb, type Db } from "./db";
 export * from "./dedup";

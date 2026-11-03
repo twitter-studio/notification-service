@@ -5,6 +5,8 @@ declare global {
     interface Env {
       /** テストだけで渡す migration (vitest.config.ts)。 */
       TEST_MIGRATIONS: D1Migration[];
+      /** migration をデータの入った D1 に当てるテストだけで使う D1 (vitest.config.ts)。 */
+      MIGRATION_DB: D1Database;
     }
   }
 }

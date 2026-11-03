@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { deviceIdOf, newAccount, registerToken, testDb, unique } from "./helpers";
+import { newAccount, testDb, unique } from "./helpers";
 
 describe("D1 のスキーマ", () => {
   it("migration を当てると、設計書の 5 つの表がある", async () => {
@@ -39,69 +39,40 @@ describe("D1 のスキーマ", () => {
     }
   });
 
-  it("アカウントの状態、APNs の環境、端末の状態は、決めた値しか入らない", async () => {
+  it("アカウントの状態、APNs の環境、端末の状態、確かめの状態は、決めた値しか入らない", async () => {
     const account = await newAccount(testDb());
+    const insertDevice = (environment: string, state: string) =>
+      env.DB.prepare(
+        "INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, state) VALUES (?, ?, 'c', ?, ?, 't', ?)",
+      )
+        .bind(unique("device"), account.installationId, unique("fingerprint"), environment, state)
+        .run();
 
     await expect(
       env.DB.prepare("UPDATE notification_accounts SET state = 'unknown' WHERE id = ?")
         .bind(account.accountId)
         .run(),
     ).rejects.toThrow(/CHECK/);
-    for (const [column, value] of [
-      ["apns_environment", "staging"],
-      ["state", "paused"],
-    ] as const) {
-      const insert = env.DB.prepare(
-        `INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, ${column === "state" ? "state" : "topic"}) VALUES (?, ?, 'c', ?, ?, 't', ?)`,
-      ).bind(
-        unique("device"),
-        account.installationId,
-        unique("fingerprint"),
-        column === "apns_environment" ? value : "sandbox",
-        column === "state" ? value : "t",
-      );
-      await expect(insert.run()).rejects.toThrow(/CHECK/);
-    }
+    await expect(
+      env.DB.prepare("UPDATE installations SET attestation_state = 'maybe' WHERE id = ?")
+        .bind(account.installationId)
+        .run(),
+    ).rejects.toThrow(/CHECK/);
+    await expect(insertDevice("staging", "active")).rejects.toThrow(/CHECK/);
+    await expect(insertDevice("sandbox", "paused")).rejects.toThrow(/CHECK/);
   });
 
   it("時刻の既定の値は、UNIX 時間のミリ秒の整数で入る", async () => {
     const before = Date.now();
-    const account = await newAccount(testDb());
+    const account = unique("account");
+    await env.DB.prepare("INSERT INTO notification_accounts (id) VALUES (?)").bind(account).run();
 
     const row = await env.DB.prepare("SELECT created_at FROM notification_accounts WHERE id = ?")
-      .bind(account.accountId)
+      .bind(account)
       .first<{ created_at: number }>();
 
     expect(Number.isInteger(row?.created_at)).toBe(true);
     expect(row?.created_at).toBeGreaterThanOrEqual(before - 1000);
     expect(row?.created_at).toBeLessThanOrEqual(Date.now() + 1000);
-  });
-
-  it("アカウントを消すと、インストール、端末、資格情報、受け付けの記録も消える", async () => {
-    const db = testDb();
-    const account = await newAccount(db);
-    deviceIdOf(await registerToken(db, account, unique("token")));
-    await env.DB.prepare("INSERT INTO delivery_dedup (account_id, event_id) VALUES (?, 'e')")
-      .bind(account.accountId)
-      .run();
-
-    await env.DB.prepare("DELETE FROM notification_accounts WHERE id = ?")
-      .bind(account.accountId)
-      .run();
-
-    for (const table of ["installations", "relay_credentials", "delivery_dedup"]) {
-      const row = await env.DB.prepare(
-        `SELECT count(*) AS count FROM ${table} WHERE account_id = ?`,
-      )
-        .bind(account.accountId)
-        .first<{ count: number }>();
-      expect(row?.count, table).toBe(0);
-    }
-    const devices = await env.DB.prepare(
-      "SELECT count(*) AS count FROM devices WHERE installation_id = ?",
-    )
-      .bind(account.installationId)
-      .first<{ count: number }>();
-    expect(devices?.count).toBe(0);
   });
 });

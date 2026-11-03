@@ -5,6 +5,7 @@ import {
   type Db,
   type DeviceRegistrationResult,
   enrollInstallation,
+  markDeviceVerified,
   registerDeviceToken,
 } from "@notification-service/db";
 
@@ -17,6 +18,8 @@ export function testDb(): Db {
   return createDb(env.DB);
 }
 
+export type Owner = { accountId: string; installationId: string };
+
 export async function newAccount(db: Db) {
   return enrollInstallation(db, {
     publicKey: unique("public-key"),
@@ -24,9 +27,13 @@ export async function newAccount(db: Db) {
   });
 }
 
+export function fingerprintOf(token: string): string {
+  return `fingerprint-of-${token}`;
+}
+
 export async function registerToken(
   db: Db,
-  owner: { accountId: string; installationId: string },
+  owner: Owner,
   token: string,
   apnsEnvironment: ApnsEnvironment = "sandbox",
 ): Promise<DeviceRegistrationResult> {
@@ -34,7 +41,7 @@ export async function registerToken(
     accountId: owner.accountId,
     installationId: owner.installationId,
     apnsTokenCiphertext: `ciphertext-of-${token}`,
-    tokenFingerprint: `fingerprint-of-${token}`,
+    tokenFingerprint: fingerprintOf(token),
     apnsEnvironment,
     topic: "com.twitter-studio.Tweetbot",
   });
@@ -44,4 +51,19 @@ export async function registerToken(
 export function deviceIdOf(result: DeviceRegistrationResult): string {
   if (result.kind !== "registered") throw new Error(`expected registered, got ${result.kind}`);
   return result.deviceId;
+}
+
+/** 登録して、トークンを持っていることを確かめた端末にする (送り先になる)。 */
+export async function registerVerified(db: Db, owner: Owner, token: string): Promise<string> {
+  const deviceId = deviceIdOf(await registerToken(db, owner, token));
+  if (
+    !(await markDeviceVerified(db, {
+      accountId: owner.accountId,
+      deviceId,
+      tokenFingerprint: fingerprintOf(token),
+    }))
+  ) {
+    throw new Error("markDeviceVerified failed");
+  }
+  return deviceId;
 }

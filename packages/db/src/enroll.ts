@@ -19,6 +19,7 @@ export type Enrollment = {
 export async function enrollInstallation(
   db: Db,
   input: { publicKey: string; relaySecretHash: string },
+  now = new Date(),
 ): Promise<Enrollment> {
   const accountId = crypto.randomUUID();
   const installationId = crypto.randomUUID();
@@ -26,21 +27,32 @@ export async function enrollInstallation(
   try {
     // D1 のバッチは、まとめて成功するか、まとめて取り消される。片方だけが残らない。
     await db.batch([
-      db.insert(notificationAccounts).values({ id: accountId }),
+      db.insert(notificationAccounts).values({ id: accountId, createdAt: now }),
       db
         .insert(installations)
-        .values({ id: installationId, accountId, publicKey: input.publicKey }),
-      db
-        .insert(relayCredentials)
-        .values({ id: relayCredentialId, accountId, secretHash: input.relaySecretHash }),
+        .values({ id: installationId, accountId, publicKey: input.publicKey, createdAt: now }),
+      db.insert(relayCredentials).values({
+        id: relayCredentialId,
+        accountId,
+        secretHash: input.relaySecretHash,
+        createdAt: now,
+      }),
     ]);
     return { accountId, installationId, relayCredentialId, created: true };
   } catch (error) {
     if (!isUniqueViolation(error, "installations.public_key")) throw error;
+    // 止めたアカウントや消したアカウントのものは返さない (呼ぶ側には、元のエラーのまま返す)。
     const existing = await db
       .select({ accountId: installations.accountId, installationId: installations.id })
       .from(installations)
-      .where(and(eq(installations.publicKey, input.publicKey), isNull(installations.revokedAt)))
+      .innerJoin(notificationAccounts, eq(installations.accountId, notificationAccounts.id))
+      .where(
+        and(
+          eq(installations.publicKey, input.publicKey),
+          isNull(installations.revokedAt),
+          eq(notificationAccounts.state, "active"),
+        ),
+      )
       .limit(1);
     const row = existing[0];
     if (row === undefined) throw error;

@@ -4,62 +4,153 @@ import {
   enableDeviceByUser,
   invalidateDevice,
   listActiveDevices,
+  markDeviceVerified,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
-import { deviceIdOf, newAccount, registerToken, testDb, unique } from "./helpers";
+import {
+  deviceIdOf,
+  fingerprintOf,
+  newAccount,
+  registerToken,
+  registerVerified,
+  testDb,
+  unique,
+} from "./helpers";
 
 describe("端末の登録", () => {
+  it("トークンを持っていることを確かめるまで、送り先にしない", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const token = unique("token");
+    const device = deviceIdOf(await registerToken(db, alice, token));
+
+    expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
+
+    await markDeviceVerified(db, {
+      accountId: alice.accountId,
+      deviceId: device,
+      tokenFingerprint: fingerprintOf(token),
+    });
+    expect((await listActiveDevices(db, alice.accountId)).map((d) => d.id)).toEqual([device]);
+  });
+
+  it("確かめを記録できるのは、自分のアカウントの端末の、今のトークンだけ", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const bob = await newAccount(db);
+    const token = unique("token");
+    const device = deviceIdOf(await registerToken(db, alice, token));
+
+    expect(
+      await markDeviceVerified(db, {
+        accountId: bob.accountId,
+        deviceId: device,
+        tokenFingerprint: fingerprintOf(token),
+      }),
+    ).toBe(false);
+    expect(
+      await markDeviceVerified(db, {
+        accountId: alice.accountId,
+        deviceId: device,
+        tokenFingerprint: "other",
+      }),
+    ).toBe(false);
+    expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
+  });
+
   it("アカウントの有効な端末だけを、送り先として返す", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
-    const aliceDevice = deviceIdOf(await registerToken(db, alice, unique("token")));
-    deviceIdOf(await registerToken(db, bob, unique("token")));
+    const aliceDevice = await registerVerified(db, alice, unique("token"));
+    await registerVerified(db, bob, unique("token"));
 
-    const devices = await listActiveDevices(db, alice.accountId);
-
-    expect(devices.map((device) => device.id)).toEqual([aliceDevice]);
+    expect((await listActiveDevices(db, alice.accountId)).map((d) => d.id)).toEqual([aliceDevice]);
   });
 
-  it("同じトークンを登録し直しても、端末は 1 つのまま", async () => {
+  it("同じトークンを登録し直しても、端末は 1 つのままで、確かめも残る", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const token = unique("token");
+    const first = await registerVerified(db, alice, token);
 
-    const first = deviceIdOf(await registerToken(db, alice, token));
-    const retried = deviceIdOf(await registerToken(db, alice, token));
-
-    expect(retried).toBe(first);
+    expect(deviceIdOf(await registerToken(db, alice, token))).toBe(first);
     expect(await listActiveDevices(db, alice.accountId)).toHaveLength(1);
   });
 
-  it("トークンが変わったら、同じ端末のトークンを書き換え、古いトークンには送らない", async () => {
+  it("トークンが変わったら、同じ端末を書き換え、確かめ直すまで送らない", async () => {
     const db = testDb();
     const alice = await newAccount(db);
-    const first = deviceIdOf(await registerToken(db, alice, unique("old-token")));
+    const first = await registerVerified(db, alice, unique("old-token"));
     const newToken = unique("new-token");
 
-    const rotated = deviceIdOf(await registerToken(db, alice, newToken));
+    expect(deviceIdOf(await registerToken(db, alice, newToken))).toBe(first);
+    expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
 
-    expect(rotated).toBe(first);
-    expect(
-      (await listActiveDevices(db, alice.accountId)).map((device) => device.tokenFingerprint),
-    ).toEqual([`fingerprint-of-${newToken}`]);
+    await markDeviceVerified(db, {
+      accountId: alice.accountId,
+      deviceId: first,
+      tokenFingerprint: fingerprintOf(newToken),
+    });
+    expect((await listActiveDevices(db, alice.accountId)).map((d) => d.tokenFingerprint)).toEqual([
+      fingerprintOf(newToken),
+    ]);
   });
 
-  it("ほかのインストールが持つトークンは、移さずに conflict にする", async () => {
+  it("確かめた有効な端末のトークンは、ほかのインストールに移さず conflict にする", async () => {
     const db = testDb();
     const victim = await newAccount(db);
     const attacker = await newAccount(db);
     const token = unique("token");
-    const victimDevice = deviceIdOf(await registerToken(db, victim, token));
+    const victimDevice = await registerVerified(db, victim, token);
 
     expect(await registerToken(db, attacker, token)).toEqual({ kind: "conflict" });
 
-    expect((await listActiveDevices(db, victim.accountId)).map((device) => device.id)).toEqual([
+    expect((await listActiveDevices(db, victim.accountId)).map((d) => d.id)).toEqual([
       victimDevice,
     ]);
     expect(await listActiveDevices(db, attacker.accountId)).toEqual([]);
+  });
+
+  it("確かめていない先取りは、本物の端末の登録に譲り、先取りした側には送らない", async () => {
+    const db = testDb();
+    const attacker = await newAccount(db);
+    const owner = await newAccount(db);
+    const token = unique("token");
+    deviceIdOf(await registerToken(db, attacker, token));
+
+    const ownerDevice = await registerVerified(db, owner, token);
+
+    expect((await listActiveDevices(db, owner.accountId)).map((d) => d.id)).toEqual([ownerDevice]);
+    expect(await listActiveDevices(db, attacker.accountId)).toEqual([]);
+  });
+
+  it("取り消したインストール、有効でないアカウント、APNs が無効と返した端末のトークンは、新しい登録に譲る", async () => {
+    const db = testDb();
+    for (const makeStale of [
+      async (owner: { installationId: string }) =>
+        env.DB.prepare("UPDATE installations SET revoked_at = ? WHERE id = ?")
+          .bind(Date.now(), owner.installationId)
+          .run(),
+      async (owner: { accountId: string }) =>
+        env.DB.prepare("UPDATE notification_accounts SET state = 'disabled' WHERE id = ?")
+          .bind(owner.accountId)
+          .run(),
+      async (owner: { accountId: string }) =>
+        env.DB.prepare("UPDATE notification_accounts SET state = 'deleted' WHERE id = ?")
+          .bind(owner.accountId)
+          .run(),
+      async (_owner: unknown, deviceId: string, token: string) =>
+        invalidateDevice(db, { deviceId, tokenFingerprint: fingerprintOf(token) }),
+    ]) {
+      const before = await newAccount(db);
+      const after = await newAccount(db);
+      const token = unique("token");
+      const old = await registerVerified(db, before, token);
+      await makeStale(before, old, token);
+
+      expect((await registerToken(db, after, token)).kind).toBe("registered");
+    }
   });
 
   it("ほかのアカウントのインストール、取り消したインストール、止めたアカウントには登録しない", async () => {
@@ -84,7 +175,22 @@ describe("端末の登録", () => {
     ).toEqual({ kind: "rejected" });
     expect(await registerToken(db, revoked, unique("token"))).toEqual({ kind: "rejected" });
     expect(await registerToken(db, disabled, unique("token"))).toEqual({ kind: "rejected" });
-    expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
+  });
+
+  it("登録できない呼び出しは、ほかのインストールの確かめていない行を消さない", async () => {
+    const db = testDb();
+    const holder = await newAccount(db);
+    const revoked = await newAccount(db);
+    const token = unique("token");
+    const held = deviceIdOf(await registerToken(db, holder, token));
+    await env.DB.prepare("UPDATE installations SET revoked_at = ? WHERE id = ?")
+      .bind(Date.now(), revoked.installationId)
+      .run();
+
+    expect(await registerToken(db, revoked, token)).toEqual({ kind: "rejected" });
+
+    const row = await env.DB.prepare("SELECT id FROM devices WHERE id = ?").bind(held).first();
+    expect(row).not.toBeNull();
   });
 
   it("同じトークンでも、sandbox と production は別のトークンとして扱う", async () => {
@@ -92,28 +198,30 @@ describe("端末の登録", () => {
     const sandbox = await newAccount(db);
     const production = await newAccount(db);
     const token = unique("token");
-
-    deviceIdOf(await registerToken(db, sandbox, token, "sandbox"));
+    await registerVerified(db, sandbox, token);
 
     expect((await registerToken(db, production, token, "production")).kind).toBe("registered");
   });
 });
 
 describe("端末の状態", () => {
-  it("止められるのは自分のアカウントの端末だけ", async () => {
+  it("止めたり戻したりできるのは、自分のアカウントの端末だけ", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
-    const aliceDevice = deviceIdOf(await registerToken(db, alice, unique("token")));
+    const device = await registerVerified(db, alice, unique("token"));
 
-    expect(await disableDeviceByUser(db, { accountId: bob.accountId, deviceId: aliceDevice })).toBe(
+    expect(await disableDeviceByUser(db, { accountId: bob.accountId, deviceId: device })).toBe(
       false,
     );
     expect(await listActiveDevices(db, alice.accountId)).toHaveLength(1);
 
-    expect(
-      await disableDeviceByUser(db, { accountId: alice.accountId, deviceId: aliceDevice }),
-    ).toBe(true);
+    expect(await disableDeviceByUser(db, { accountId: alice.accountId, deviceId: device })).toBe(
+      true,
+    );
+    expect(await enableDeviceByUser(db, { accountId: bob.accountId, deviceId: device })).toBe(
+      false,
+    );
     expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
   });
 
@@ -121,7 +229,7 @@ describe("端末の状態", () => {
     const db = testDb();
     const alice = await newAccount(db);
     const token = unique("token");
-    const device = deviceIdOf(await registerToken(db, alice, token));
+    const device = await registerVerified(db, alice, token);
     await disableDeviceByUser(db, { accountId: alice.accountId, deviceId: device });
 
     deviceIdOf(await registerToken(db, alice, token));
@@ -133,14 +241,14 @@ describe("端末の状態", () => {
     expect(await listActiveDevices(db, alice.accountId)).toHaveLength(1);
   });
 
-  it("APNs が無効と返した端末は止め、トークンを登録し直すと送る", async () => {
+  it("APNs が無効と返した端末は止め、同じインストールがトークンを登録し直すと送る", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const token = unique("token");
-    const device = deviceIdOf(await registerToken(db, alice, token));
+    const device = await registerVerified(db, alice, token);
 
     expect(
-      await invalidateDevice(db, { deviceId: device, tokenFingerprint: `fingerprint-of-${token}` }),
+      await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(token) }),
     ).toBe(true);
     expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
 
@@ -152,14 +260,17 @@ describe("端末の状態", () => {
     const db = testDb();
     const alice = await newAccount(db);
     const oldToken = unique("old-token");
-    const device = deviceIdOf(await registerToken(db, alice, oldToken));
-    deviceIdOf(await registerToken(db, alice, unique("new-token")));
+    const device = await registerVerified(db, alice, oldToken);
+    const newToken = unique("new-token");
+    deviceIdOf(await registerToken(db, alice, newToken));
+    await markDeviceVerified(db, {
+      accountId: alice.accountId,
+      deviceId: device,
+      tokenFingerprint: fingerprintOf(newToken),
+    });
 
     expect(
-      await invalidateDevice(db, {
-        deviceId: device,
-        tokenFingerprint: `fingerprint-of-${oldToken}`,
-      }),
+      await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(oldToken) }),
     ).toBe(false);
     expect(await listActiveDevices(db, alice.accountId)).toHaveLength(1);
   });

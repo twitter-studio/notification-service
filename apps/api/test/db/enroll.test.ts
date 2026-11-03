@@ -64,4 +64,17 @@ describe("登録 (アカウント、インストール、中継の資格情報)"
 
     await expect(second.run()).rejects.toThrow(/UNIQUE/);
   });
+
+  it("止めたアカウントの公開鍵で呼び直しても、そのアカウントは返さない", async () => {
+    const db = testDb();
+    const publicKey = unique("key");
+    const first = await enrollInstallation(db, { publicKey, relaySecretHash: unique("hash") });
+    await env.DB.prepare("UPDATE notification_accounts SET state = 'disabled' WHERE id = ?")
+      .bind(first.accountId)
+      .run();
+
+    await expect(
+      enrollInstallation(db, { publicKey, relaySecretHash: unique("hash") }),
+    ).rejects.toThrow();
+  });
 });

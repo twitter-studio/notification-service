@@ -11,7 +11,11 @@ export default defineConfig(async () => {
     plugins: [
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
-        miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+        miniflare: {
+          bindings: { TEST_MIGRATIONS: migrations },
+          // migration をデータの入った D1 に当てるテストのための、テストだけの D1。
+          d1Databases: { MIGRATION_DB: "migration-test" },
+        },
       }),
     ],
     test: { setupFiles: ["./test/apply-migrations.ts"] },
