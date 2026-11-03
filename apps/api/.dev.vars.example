@@ -1,0 +1,2 @@
+# 手元で使う秘密の名前の一覧 (値は書かない)。手元では、この名前で .dev.vars (コミットしない) に値を置く。
+# 型 (worker-configuration.d.ts) は、このファイルから作る。秘密を足したら、ここにも名前を足して `pnpm --filter @notification-service/api types` を動かす。
