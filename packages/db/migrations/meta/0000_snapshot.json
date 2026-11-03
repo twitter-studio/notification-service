@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "095d2eab-87fd-49e2-97ab-f714ac21d272",
+  "id": "d2f274f9-9df1-4244-924a-2396dfad52af",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -53,13 +53,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "idx_delivery_dedup_account_accepted": {
-          "name": "idx_delivery_dedup_account_accepted",
-          "columns": ["account_id", "accepted_at"],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "delivery_dedup_account_id_notification_accounts_id_fk": {
           "name": "delivery_dedup_account_id_notification_accounts_id_fk",

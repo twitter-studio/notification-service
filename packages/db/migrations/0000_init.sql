@@ -10,7 +10,6 @@ CREATE TABLE `delivery_dedup` (
 	CONSTRAINT "delivery_dedup_state" CHECK("delivery_dedup"."state" IN ('processing', 'done'))
 );
 --> statement-breakpoint
-CREATE INDEX `idx_delivery_dedup_account_accepted` ON `delivery_dedup` (`account_id`,`accepted_at`);--> statement-breakpoint
 CREATE TABLE `device_verifications` (
 	`device_id` text PRIMARY KEY NOT NULL,
 	`code_hash` text NOT NULL,

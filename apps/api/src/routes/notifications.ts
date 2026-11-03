@@ -8,6 +8,7 @@ import {
   invalidateDevice,
   listActiveDevices,
   releaseEvent,
+  utcDayStart,
 } from "@notification-service/db";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv, RelayEnv } from "../app";
@@ -49,7 +50,6 @@ export const SEND_BUDGET_MS = 60 * 1000;
 
 const IN_PROGRESS_RETRY_AFTER_SECONDS = 30;
 const UNAVAILABLE_RETRY_AFTER_SECONDS = 60;
-const DAILY_LIMIT_RETRY_AFTER_SECONDS = 60 * 60;
 
 const EventSchema = z
   .strictObject({
@@ -158,19 +158,21 @@ export function registerNotifications(
       if (state === "done")
         return c.json({ event_id: body.event_id, status: "duplicate" as const }, 202);
       if (state === "in_progress") throw inProgress();
-      // 新しく受け付けるときだけ、1 日の数を 1 行で数える。
+      // 新しいイベントのときだけ、1 日の数を 1 行で数える。止まった処理中の記録は、最初に受け付けたときに数えている。
       if (
+        state === "new" &&
         !(await consumeDailyRelayQuota(
           db,
-          {
-            accountId: credential.accountId,
-            limit: MAX_EVENTS_PER_DAY,
-          },
+          { accountId: credential.accountId, limit: MAX_EVENTS_PER_DAY },
           now,
         ))
       ) {
+        // 次の UTC の 0 時 (数え直す時刻) まで待ってもらう。
+        const retryAfter = Math.ceil(
+          (utcDayStart(now).getTime() + 24 * 60 * 60 * 1000 - now.getTime()) / 1000,
+        );
         throw new ProblemError(429, "Too Many Requests", undefined, {
-          "Retry-After": String(DAILY_LIMIT_RETRY_AFTER_SECONDS),
+          "Retry-After": String(retryAfter),
         });
       }
       // 受け付けの記録には、サーバーの時刻を渡す (送り手の時刻で、記録を早く消させない)。

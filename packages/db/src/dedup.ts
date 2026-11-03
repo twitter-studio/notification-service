@@ -100,44 +100,52 @@ export async function releaseEvent(
 }
 
 /**
- * 受け付けの記録の今の状態 (主キーで 1 行だけ読む)。`open` は、記録がないか、止まった処理中の記録 (引き継げる)。
+ * 受け付けの記録の今の状態 (主キーで 1 行だけ読む)。`new` は記録がない、`stale` は止まった処理中の記録 (引き継げる)。
  * 済んだ重複と処理中のやり直しを、1 日の上限より先に答えるのに使う。受け付けるかは、`beginEvent` が 1 文で決め直す。
  */
 export async function findEventState(
   db: Db,
   input: EventRef,
   now = new Date(),
-): Promise<"open" | "done" | "in_progress"> {
+): Promise<"new" | "stale" | "done" | "in_progress"> {
   const row = await db.$client
     .prepare(
       "SELECT state, updated_at FROM delivery_dedup WHERE account_id = ?1 AND event_key = ?2",
     )
     .bind(input.accountId, input.eventKey)
     .first<{ state: string; updated_at: number }>();
-  if (row === null) return "open";
+  if (row === null) return "new";
   if (row.state === "done") return "done";
-  return row.updated_at < now.getTime() - EVENT_PROCESSING_LEASE_MS ? "open" : "in_progress";
+  return row.updated_at < now.getTime() - EVENT_PROCESSING_LEASE_MS ? "stale" : "in_progress";
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** UTC の 0 時 (D1 の無料のプランの枠が戻る時刻)。 */
+export function utcDayStart(now: Date): Date {
+  return new Date(now.getTime() - (now.getTime() % DAY_MS));
 }
 
 /**
- * アカウントの 1 日の受け付けの数を 1 つ増やす。数え始めてから 1 日を過ぎていたら、数え直す。上限に届いていたら増やさず false。
- * 1 文で行うので、同時に来ても上限を越えない。読むのも書くのも 1 行。
+ * アカウントの 1 日 (UTC の 0 時から) の受け付けの数を 1 つ増やす。日が変わっていたら、数え直す。上限に届いていたら増やさず false。
+ * 1 文で行うので、同時に来ても上限を越えない。読むのも書くのも 1 行。数える日を D1 の枠の日 (UTC) にそろえ、1 つの日に
+ * 上限の 2 日分が入らないようにする。
  */
 export async function consumeDailyRelayQuota(
   db: Db,
   input: { accountId: string; limit: number },
   now = new Date(),
 ): Promise<boolean> {
-  const windowExpired = now.getTime() - 24 * 60 * 60 * 1000;
+  if (input.limit <= 0) return false;
   const row = await db.$client
     .prepare(`
       INSERT INTO relay_usage (account_id, window_start, count) VALUES (?1, ?2, 1)
       ON CONFLICT (account_id) DO UPDATE SET
-        window_start = CASE WHEN relay_usage.window_start <= ?3 THEN excluded.window_start ELSE relay_usage.window_start END,
-        count = CASE WHEN relay_usage.window_start <= ?3 THEN 1 ELSE relay_usage.count + 1 END
-        WHERE relay_usage.window_start <= ?3 OR relay_usage.count < ?4
+        count = CASE WHEN relay_usage.window_start < ?2 THEN 1 ELSE relay_usage.count + 1 END,
+        window_start = ?2
+        WHERE relay_usage.window_start < ?2 OR relay_usage.count < ?3
       RETURNING count`)
-    .bind(input.accountId, now.getTime(), windowExpired, input.limit)
+    .bind(input.accountId, utcDayStart(now).getTime(), input.limit)
     .first<{ count: number }>();
   return row !== null;
 }

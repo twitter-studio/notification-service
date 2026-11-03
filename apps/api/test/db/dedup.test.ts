@@ -9,6 +9,7 @@ import {
   type EventStart,
   findEventState,
   releaseEvent,
+  utcDayStart,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import { newAccount, testDb } from "./helpers";
@@ -120,39 +121,42 @@ describe("イベントの重複の除去", () => {
     ).rejects.toThrow(/CHECK/);
   });
 
-  it("記録の状態は、ない・止まった処理中なら open、済みなら done、処理中なら in_progress", async () => {
+  it("記録の状態は、ないなら new、止まった処理中なら stale、済みなら done、処理中なら in_progress", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const event = { accountId: alice.accountId, eventKey: "state" };
     const start = new Date("2026-11-04T00:00:00.000Z");
 
-    expect(await findEventState(db, event, start)).toBe("open");
+    expect(await findEventState(db, event, start)).toBe("new");
     const leaseId = leaseOf(await beginEvent(db, event, start));
     expect(await findEventState(db, event, start)).toBe("in_progress");
     expect(
       await findEventState(db, event, new Date(start.getTime() + EVENT_PROCESSING_LEASE_MS + 1)),
-    ).toBe("open");
+    ).toBe("stale");
     await completeEvent(db, { ...event, leaseId }, start);
     expect(await findEventState(db, event, start)).toBe("done");
   });
 
-  it("1 日の数は、上限まで数え、1 日を過ぎたら数え直す。アカウントごとに分ける", async () => {
+  it("1 日の数は、UTC の 0 時から上限まで数え、日が変わったら数え直す。アカウントごとに分ける", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
-    const start = new Date("2026-11-04T00:00:00.000Z");
+    const lateNight = new Date("2026-11-04T23:59:59.000Z");
     const consume = (accountId: string, at: Date) =>
       consumeDailyRelayQuota(db, { accountId, limit: 3 }, at);
 
     const results = [];
     for (let index = 0; index < 4; index++) {
-      results.push(await consume(alice.accountId, new Date(start.getTime() + index)));
+      results.push(await consume(alice.accountId, new Date(lateNight.getTime() + index)));
     }
     expect(results).toEqual([true, true, true, false]);
-    expect(await consume(bob.accountId, start)).toBe(true);
-    expect(await consume(alice.accountId, new Date(start.getTime() + 24 * 60 * 60 * 1000))).toBe(
-      true,
+    expect(await consume(bob.accountId, lateNight)).toBe(true);
+    // 日が変わったら (UTC の 0 時)、数え始めから 1 日たっていなくても数え直す。
+    expect(await consume(alice.accountId, new Date("2026-11-05T00:00:00.000Z"))).toBe(true);
+    expect(utcDayStart(new Date("2026-11-05T12:34:56.789Z"))).toEqual(
+      new Date("2026-11-05T00:00:00.000Z"),
     );
+    expect(await consumeDailyRelayQuota(db, { accountId: bob.accountId, limit: 0 })).toBe(false);
   });
 
   it("同時に数えても、上限を越えない", async () => {

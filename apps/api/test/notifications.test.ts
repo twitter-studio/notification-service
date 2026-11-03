@@ -392,7 +392,10 @@ describe("中継の受け付け", () => {
 
     const response = await relay(app, alice.enrolled.relay_secret, newEvent());
 
-    expect(response.headers.get("Retry-After")).toBe("3600");
+    // 次の UTC の 0 時まで待ってもらう。
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(24 * 60 * 60);
     await expectProblem(response, 429);
     expect(sent).toHaveLength(1);
     expect(await (await relay(app, alice.enrolled.relay_secret, done)).json()).toEqual({
@@ -400,6 +403,22 @@ describe("中継の受け付け", () => {
       status: "duplicate",
     });
     await expectProblem(await relay(app, alice.enrolled.relay_secret, processing), 409);
+
+    // 止まった処理中の記録は、最初に受け付けたときに数えているので、上限の後でも引き継いで送る。
+    const stale = newEvent();
+    await beginEvent(
+      createDb(env.DB),
+      {
+        accountId: alice.enrolled.account_id,
+        eventKey: await keyOf(alice.enrolled.account_id, stale.event_id),
+      },
+      new Date(Date.now() - 3 * 60 * 1000),
+    );
+    expect(await (await relay(app, alice.enrolled.relay_secret, stale)).json()).toEqual({
+      event_id: stale.event_id,
+      status: "accepted",
+    });
+    expect(sent).toHaveLength(2);
   });
 
   it("送り先の端末がなければ、受け付けの記録も 1 日の数も書かない", async () => {

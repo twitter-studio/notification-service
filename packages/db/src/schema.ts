@@ -173,9 +173,6 @@ export const deliveryDedup = sqliteTable(
   },
   (t) => [
     primaryKey({ columns: [t.accountId, t.eventKey] }),
-    // アカウントごとの 1 日の受け付けの数を数える。定期の掃除 (受け付けた時刻で消す) は、表を読んで探す (索引を増やすと、
-    // 受け付けのたびの書き込みが増えるため)。
-    index("idx_delivery_dedup_account_accepted").on(t.accountId, t.acceptedAt),
     check("delivery_dedup_state", sql`${t.state} IN ('processing', 'done')`),
   ],
 );
@@ -188,7 +185,7 @@ export const relayUsage = sqliteTable("relay_usage", {
   accountId: text("account_id")
     .primaryKey()
     .references(() => notificationAccounts.id),
-  // 数え始めた時刻。ここから 1 日を過ぎたら、数え直す。
+  // 数えている日 (UTC の 0 時)。日が変わったら、数え直す。
   windowStart: timestamp("window_start").notNull(),
   count: integer("count").notNull(),
 });
