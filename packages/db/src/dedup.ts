@@ -99,19 +99,47 @@ export async function releaseEvent(
   return result.meta.changes > 0;
 }
 
-/** アカウントが `since` より後に受け付けたイベントの数 (1 日の上限を数える)。 */
-export async function countAcceptedEventsSince(
+/**
+ * 受け付けの記録の今の状態 (主キーで 1 行だけ読む)。`open` は、記録がないか、止まった処理中の記録 (引き継げる)。
+ * 済んだ重複と処理中のやり直しを、1 日の上限より先に答えるのに使う。受け付けるかは、`beginEvent` が 1 文で決め直す。
+ */
+export async function findEventState(
   db: Db,
-  accountId: string,
-  since: Date,
-): Promise<number> {
+  input: EventRef,
+  now = new Date(),
+): Promise<"open" | "done" | "in_progress"> {
   const row = await db.$client
     .prepare(
-      "SELECT count(*) AS count FROM delivery_dedup WHERE account_id = ?1 AND accepted_at > ?2",
+      "SELECT state, updated_at FROM delivery_dedup WHERE account_id = ?1 AND event_key = ?2",
     )
-    .bind(accountId, since.getTime())
+    .bind(input.accountId, input.eventKey)
+    .first<{ state: string; updated_at: number }>();
+  if (row === null) return "open";
+  if (row.state === "done") return "done";
+  return row.updated_at < now.getTime() - EVENT_PROCESSING_LEASE_MS ? "open" : "in_progress";
+}
+
+/**
+ * アカウントの 1 日の受け付けの数を 1 つ増やす。数え始めてから 1 日を過ぎていたら、数え直す。上限に届いていたら増やさず false。
+ * 1 文で行うので、同時に来ても上限を越えない。読むのも書くのも 1 行。
+ */
+export async function consumeDailyRelayQuota(
+  db: Db,
+  input: { accountId: string; limit: number },
+  now = new Date(),
+): Promise<boolean> {
+  const windowExpired = now.getTime() - 24 * 60 * 60 * 1000;
+  const row = await db.$client
+    .prepare(`
+      INSERT INTO relay_usage (account_id, window_start, count) VALUES (?1, ?2, 1)
+      ON CONFLICT (account_id) DO UPDATE SET
+        window_start = CASE WHEN relay_usage.window_start <= ?3 THEN excluded.window_start ELSE relay_usage.window_start END,
+        count = CASE WHEN relay_usage.window_start <= ?3 THEN 1 ELSE relay_usage.count + 1 END
+        WHERE relay_usage.window_start <= ?3 OR relay_usage.count < ?4
+      RETURNING count`)
+    .bind(input.accountId, now.getTime(), windowExpired, input.limit)
     .first<{ count: number }>();
-  return row?.count ?? 0;
+  return row !== null;
 }
 
 /**
@@ -125,7 +153,9 @@ export async function deleteAcceptedEventsBefore(
 ): Promise<number> {
   const result = await db.$client
     .prepare(
-      "DELETE FROM delivery_dedup WHERE rowid IN (SELECT rowid FROM delivery_dedup WHERE accepted_at < ?1 LIMIT ?2)",
+      // 索引 (アカウントの順) で読むと、区切りごとに前のアカウントの新しい行を読み直す。rowid の順 (ほぼ受け付けた順) に
+      // 読めば、古い行から見つかる。
+      "DELETE FROM delivery_dedup WHERE rowid IN (SELECT rowid FROM delivery_dedup NOT INDEXED WHERE accepted_at < ?1 LIMIT ?2)",
     )
     .bind(cutoff.getTime(), limit)
     .run();

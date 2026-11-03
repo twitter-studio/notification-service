@@ -81,6 +81,13 @@ CREATE TABLE `relay_credentials` (
 CREATE UNIQUE INDEX `relay_credentials_secret_hash_unique` ON `relay_credentials` (`secret_hash`);--> statement-breakpoint
 CREATE INDEX `idx_relay_credentials_account` ON `relay_credentials` (`account_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_relay_credentials_revoked` ON `relay_credentials` (`revoked_at`);--> statement-breakpoint
+CREATE TABLE `relay_usage` (
+	`account_id` text PRIMARY KEY NOT NULL,
+	`window_start` integer NOT NULL,
+	`count` integer NOT NULL,
+	FOREIGN KEY (`account_id`) REFERENCES `notification_accounts`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`account_id` text NOT NULL,

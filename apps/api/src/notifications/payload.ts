@@ -1,3 +1,4 @@
+import type { DeviceTokenKeys } from "../security/device-token";
 import { toBase64Url } from "../security/encoding";
 
 // 利用者の Worker から受け付けるイベントと、端末へ送る通知の中身 (ADR-0009)。
@@ -18,12 +19,22 @@ export type RelayEvent = {
 export const EVENT_TYPES_WITHOUT_POST: ReadonlySet<EventType> = new Set(["follow"]);
 
 /**
- * 受け付けの記録の鍵。送り手の event_id の SHA-256 (Base64URL、43 文字)。event_id に X の ID などが入りうるので、
- * 生の値を DB に置かない。長さが決まるので、APNs の apns-collapse-id (64 バイトまで) にも使える。
+ * 受け付けの記録の鍵。アカウントと送り手の event_id の HMAC-SHA256 (Base64URL、43 文字)。
+ * event_id に X の ID などが入りうるので、生の値も、鍵のないハッシュ (推しやすい候補から確かめられる) も DB に置かない。
+ * アカウントを入れて、同じ event_id でもアカウントごとに違う鍵にする (アカウントどうしを結び付けさせない)。
+ * 鍵はデバイストークンの指紋の鍵 (入れ替えない。ADR-0005) を使い、頭の文で用途を分ける (指紋は 16 進数のトークンの HMAC)。
+ * 長さが決まるので、APNs の apns-collapse-id (64 バイトまで) にも使える。
  */
-export async function eventKeyOf(eventId: string): Promise<string> {
+export async function eventKeyOf(
+  keys: DeviceTokenKeys,
+  accountId: string,
+  eventId: string,
+): Promise<string> {
+  const message = ["twitter-studio/event-key/v1", accountId, eventId].join("\n");
   return toBase64Url(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(eventId))),
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", keys.fingerprintKey, new TextEncoder().encode(message)),
+    ),
   );
 }
 

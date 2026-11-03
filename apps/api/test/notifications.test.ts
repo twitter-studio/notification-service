@@ -17,14 +17,18 @@ import { type Enrolled, enrollNewDevice, expectProblem } from "./helpers/api";
 import { jsonHeaders } from "./helpers/http";
 import { expectLimitReached, outcomeOf } from "./helpers/rate-limit";
 
-type Sent = { target: PushTarget; notification: OutgoingNotification };
+type Sent = { target: PushTarget; notification: OutgoingNotification; signal: AbortSignal };
+
+async function keyOf(accountId: string, eventId: string): Promise<string> {
+  return eventKeyOf(await loadDeviceTokenKeys(env), accountId, eventId);
+}
 
 /** 通知を、送らずに記録する app。`outcome` で、送り手の結果を決める。 */
 function appWithPush(outcome: () => Promise<PushOutcome> = async () => "sent") {
   const sent: Sent[] = [];
   const app = createApp({
-    push: async (target, notification) => {
-      sent.push({ target, notification });
+    push: async (target, notification, { signal }) => {
+      sent.push({ target, notification, signal });
       return outcome();
     },
   });
@@ -100,7 +104,7 @@ describe("中継の受け付け", () => {
       topic: TOPIC,
     });
     expect(sent[0]?.notification).toEqual({
-      eventKey: await eventKeyOf(event.event_id),
+      eventKey: await keyOf(alice.enrolled.account_id, event.event_id),
       payload: {
         aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
         event_type: "mention",
@@ -140,7 +144,7 @@ describe("中継の受け付け", () => {
     const event = newEvent();
     await beginEvent(createDb(env.DB), {
       accountId: alice.enrolled.account_id,
-      eventKey: await eventKeyOf(event.event_id),
+      eventKey: await keyOf(alice.enrolled.account_id, event.event_id),
     });
 
     const response = await relay(app, alice.enrolled.relay_secret, event);
@@ -304,7 +308,10 @@ describe("中継の受け付け", () => {
     const event = newEvent();
     await beginEvent(
       createDb(env.DB),
-      { accountId: alice.enrolled.account_id, eventKey: await eventKeyOf(event.event_id) },
+      {
+        accountId: alice.enrolled.account_id,
+        eventKey: await keyOf(alice.enrolled.account_id, event.event_id),
+      },
       new Date(Date.now() - 3 * 60 * 1000),
     );
 
@@ -369,21 +376,95 @@ describe("中継の受け付け", () => {
     quiet.mockRestore();
   });
 
-  it("1 日に受け付けられる数を超えると 429 で、送らない", async () => {
+  it("1 日に受け付けられる数を超えると 429 で、送らない。済んだ重複と処理中のやり直しの答えは変えない", async () => {
     const { app, sent } = appWithPush();
     const alice = await accountWithDevice();
-    await env.DB.prepare(`
-      WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?2)
-      INSERT INTO delivery_dedup (account_id, event_key, accepted_at, state, updated_at)
-      SELECT ?1, 'filler-' || i, ?3, 'done', ?3 FROM n`)
-      .bind(alice.enrolled.account_id, MAX_EVENTS_PER_DAY, Date.now() - 60_000)
+    const done = newEvent();
+    await relay(app, alice.enrolled.relay_secret, done);
+    const processing = newEvent();
+    await beginEvent(createDb(env.DB), {
+      accountId: alice.enrolled.account_id,
+      eventKey: await keyOf(alice.enrolled.account_id, processing.event_id),
+    });
+    await env.DB.prepare("UPDATE relay_usage SET count = ? WHERE account_id = ?")
+      .bind(MAX_EVENTS_PER_DAY, alice.enrolled.account_id)
       .run();
 
     const response = await relay(app, alice.enrolled.relay_secret, newEvent());
 
     expect(response.headers.get("Retry-After")).toBe("3600");
     await expectProblem(response, 429);
+    expect(sent).toHaveLength(1);
+    expect(await (await relay(app, alice.enrolled.relay_secret, done)).json()).toEqual({
+      event_id: done.event_id,
+      status: "duplicate",
+    });
+    await expectProblem(await relay(app, alice.enrolled.relay_secret, processing), 409);
+  });
+
+  it("送り先の端末がなければ、受け付けの記録も 1 日の数も書かない", async () => {
+    const { app } = appWithPush();
+    const { enrolled } = await enrollNewDevice();
+
+    expect((await relay(app, enrolled.relay_secret, newEvent())).status).toBe(202);
+
+    for (const table of ["delivery_dedup", "relay_usage"]) {
+      const row = await env.DB.prepare(
+        `SELECT count(*) AS count FROM ${table} WHERE account_id = ?`,
+      )
+        .bind(enrolled.account_id)
+        .first<{ count: number }>();
+      expect(row?.count, table).toBe(0);
+    }
+  });
+
+  it("送り手に、送る時間の上限の signal を渡す。上限を過ぎたら送らず、error のログに出す", async () => {
+    const first = appWithPush();
+    const alice = await accountWithDevice();
+    await relay(first.app, alice.enrolled.relay_secret, newEvent());
+    expect(first.sent[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(first.sent[0]?.signal.aborted).toBe(false);
+
+    const sent: unknown[] = [];
+    const expired = createApp({
+      push: async (target) => {
+        sent.push(target);
+        return "sent";
+      },
+      relaySendBudgetMs: 0,
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await relay(expired, alice.enrolled.relay_secret, newEvent())).status).toBe(202);
     expect(sent).toEqual([]);
+    expect(JSON.stringify(errors.mock.calls)).toContain('\\"skipped\\":1');
+    errors.mockRestore();
+  });
+
+  it("送っている間に、ほかの要求に引き継がれたら、済みにせず、ログに出す", async () => {
+    const alice = await accountWithDevice();
+    const event = newEvent();
+    const eventKey = await keyOf(alice.enrolled.account_id, event.event_id);
+    const { app } = appWithPush(async () => {
+      // 送っている間にリースが切れ、ほかの要求が引き継いだ。
+      await env.DB.prepare(
+        "UPDATE delivery_dedup SET lease_id = 'other' WHERE account_id = ? AND event_key = ?",
+      )
+        .bind(alice.enrolled.account_id, eventKey)
+        .run();
+      return "sent";
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect((await relay(app, alice.enrolled.relay_secret, event)).status).toBe(202);
+
+    expect(JSON.stringify(errors.mock.calls)).toContain("relay_lease_lost");
+    const row = await env.DB.prepare(
+      "SELECT state FROM delivery_dedup WHERE account_id = ? AND event_key = ?",
+    )
+      .bind(alice.enrolled.account_id, eventKey)
+      .first<{ state: string }>();
+    expect(row?.state).toBe("processing");
+    errors.mockRestore();
   });
 
   it("受け付けの記録には、event_id の生の値を置かない", async () => {
@@ -396,7 +477,9 @@ describe("中継の受け付け", () => {
     const rows = await env.DB.prepare("SELECT event_key FROM delivery_dedup WHERE account_id = ?")
       .bind(alice.enrolled.account_id)
       .all<{ event_key: string }>();
-    expect(rows.results.map((row) => row.event_key)).toEqual([await eventKeyOf(event.event_id)]);
+    expect(rows.results.map((row) => row.event_key)).toEqual([
+      await keyOf(alice.enrolled.account_id, event.event_id),
+    ]);
     expect(JSON.stringify(rows.results)).not.toContain("1234567890123456789");
   });
 });

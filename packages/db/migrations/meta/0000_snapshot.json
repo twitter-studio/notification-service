@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "83eaaba0-db04-46ec-bc25-a0101c1e19bd",
+  "id": "095d2eab-87fd-49e2-97ab-f714ac21d272",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "delivery_dedup": {
@@ -506,6 +506,47 @@
           "value": "length(\"relay_credentials\".\"secret_hash\") = 43 AND \"relay_credentials\".\"secret_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
         }
       }
+    },
+    "relay_usage": {
+      "name": "relay_usage",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "window_start": {
+          "name": "window_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "relay_usage_account_id_notification_accounts_id_fk": {
+          "name": "relay_usage_account_id_notification_accounts_id_fk",
+          "tableFrom": "relay_usage",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "sessions": {
       "name": "sessions",

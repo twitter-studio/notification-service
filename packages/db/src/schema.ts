@@ -158,7 +158,8 @@ export const deliveryDedup = sqliteTable(
     accountId: text("account_id")
       .notNull()
       .references(() => notificationAccounts.id),
-    // 送り手の event_id の SHA-256 (Base64URL)。event_id に X の ID などが入りうるので、生の値を DB に置かない (ADR-0009)。
+    // 送り手の event_id の、サーバーの鍵とアカウントを入れた HMAC (Base64URL)。event_id に X の ID などが入りうるので、
+    // 生の値も、鍵のないハッシュ (候補から確かめられる) も DB に置かない (ADR-0009)。
     eventKey: text("event_key").notNull(),
     acceptedAt: timestamp("accepted_at").notNull().default(now),
     // 送る処理の途中 (processing) か、済んだ (done) か。処理中のやり直しを、済んだ重複と分けて答えるため (ADR-0009)。
@@ -178,6 +179,19 @@ export const deliveryDedup = sqliteTable(
     check("delivery_dedup_state", sql`${t.state} IN ('processing', 'done')`),
   ],
 );
+
+/**
+ * アカウントごとの、中継の受け付けの 1 日の数 (ADR-0009)。1 行で数え、受け付けのたびに 1 行だけ読み書きする。
+ * 受け付けの記録を数えると、上限に近いアカウントの要求のたびに、上限の数だけ行を読むため。
+ */
+export const relayUsage = sqliteTable("relay_usage", {
+  accountId: text("account_id")
+    .primaryKey()
+    .references(() => notificationAccounts.id),
+  // 数え始めた時刻。ここから 1 日を過ぎたら、数え直す。
+  windowStart: timestamp("window_start").notNull(),
+  count: integer("count").notNull(),
+});
 
 /**
  * 使ったチャレンジ (登録やセッションの作り直しで、署名したもの)。同じチャレンジを 2 回使わせないため。

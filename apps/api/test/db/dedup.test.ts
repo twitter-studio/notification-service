@@ -2,10 +2,12 @@ import { env } from "cloudflare:workers";
 import {
   beginEvent,
   completeEvent,
-  countAcceptedEventsSince,
+  consumeDailyRelayQuota,
+  createDb,
   deleteAcceptedEventsBefore,
   EVENT_PROCESSING_LEASE_MS,
   type EventStart,
+  findEventState,
   releaseEvent,
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
@@ -118,29 +120,98 @@ describe("イベントの重複の除去", () => {
     ).rejects.toThrow(/CHECK/);
   });
 
-  it("アカウントが期間のあいだに受け付けた数を数える", async () => {
+  it("記録の状態は、ない・止まった処理中なら open、済みなら done、処理中なら in_progress", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+    const event = { accountId: alice.accountId, eventKey: "state" };
+    const start = new Date("2026-11-04T00:00:00.000Z");
+
+    expect(await findEventState(db, event, start)).toBe("open");
+    const leaseId = leaseOf(await beginEvent(db, event, start));
+    expect(await findEventState(db, event, start)).toBe("in_progress");
+    expect(
+      await findEventState(db, event, new Date(start.getTime() + EVENT_PROCESSING_LEASE_MS + 1)),
+    ).toBe("open");
+    await completeEvent(db, { ...event, leaseId }, start);
+    expect(await findEventState(db, event, start)).toBe("done");
+  });
+
+  it("1 日の数は、上限まで数え、1 日を過ぎたら数え直す。アカウントごとに分ける", async () => {
     const db = testDb();
     const alice = await newAccount(db);
     const bob = await newAccount(db);
-    const since = new Date("2026-11-03T00:00:00.000Z");
-    await beginEvent(db, { accountId: alice.accountId, eventKey: "before" }, since);
-    await beginEvent(
-      db,
-      { accountId: alice.accountId, eventKey: "after-1" },
-      new Date(since.getTime() + 1),
+    const start = new Date("2026-11-04T00:00:00.000Z");
+    const consume = (accountId: string, at: Date) =>
+      consumeDailyRelayQuota(db, { accountId, limit: 3 }, at);
+
+    const results = [];
+    for (let index = 0; index < 4; index++) {
+      results.push(await consume(alice.accountId, new Date(start.getTime() + index)));
+    }
+    expect(results).toEqual([true, true, true, false]);
+    expect(await consume(bob.accountId, start)).toBe(true);
+    expect(await consume(alice.accountId, new Date(start.getTime() + 24 * 60 * 60 * 1000))).toBe(
+      true,
     );
-    await beginEvent(
-      db,
-      { accountId: alice.accountId, eventKey: "after-2" },
-      new Date(since.getTime() + 2),
-    );
-    await beginEvent(
-      db,
-      { accountId: bob.accountId, eventKey: "after-1" },
-      new Date(since.getTime() + 1),
+  });
+
+  it("同時に数えても、上限を越えない", async () => {
+    const db = testDb();
+    const alice = await newAccount(db);
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        consumeDailyRelayQuota(db, { accountId: alice.accountId, limit: 3 }),
+      ),
     );
 
-    expect(await countAcceptedEventsSince(db, alice.accountId, since)).toBe(2);
+    expect(results.filter(Boolean)).toHaveLength(3);
+  });
+
+  it("掃除は、古い行を受け付けた順に探し、ほかのアカウントの新しい行を読み直さない", async () => {
+    const before = new Date("2026-11-01T00:00:00.000Z");
+    const [first, second] = [await newAccount(testDb()), await newAccount(testDb())].sort((a, b) =>
+      a.accountId.localeCompare(b.accountId),
+    );
+    // 索引の順 (アカウントの順) では先に来るアカウントに新しい行を、後のアカウントに古い行を、古い行から先に置く。
+    const insert = (accountId: string, prefix: string, at: number, count: number) =>
+      env.DB.prepare(`
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?4)
+        INSERT INTO delivery_dedup (account_id, event_key, accepted_at, state, updated_at)
+        SELECT ?1, ?2 || i, ?3, 'done', ?3 FROM n`)
+        .bind(accountId, prefix, at, count)
+        .run();
+    await insert(second?.accountId ?? "", "old-", before.getTime() - 1, 300);
+    await insert(first?.accountId ?? "", "new-", before.getTime() + 1, 2000);
+    let rowsRead = 0;
+    const counting = new Proxy(env.DB, {
+      get(target, property, receiver) {
+        if (property !== "prepare") {
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          return {
+            bind: (...values: unknown[]) => {
+              const bound = statement.bind(...values);
+              return {
+                run: async () => {
+                  const result = await bound.run();
+                  rowsRead += result.meta.rows_read;
+                  return result;
+                },
+              };
+            },
+          };
+        };
+      },
+    }) as D1Database;
+
+    expect(await deleteAcceptedEventsBefore(createDb(counting), before, 100)).toBe(100);
+
+    // 古い行 100 件を探すのに、新しい 2,000 行は読まない。
+    expect(rowsRead).toBeLessThan(500);
   });
 
   it("古い記録だけを消す", async () => {
