@@ -16,7 +16,7 @@ QA-001 で、通常配信・Queue の経路・通知タップの実機証拠は�
 - `delivery_retry`: 最初の Queue 投入 / consumer の再予約、consumer 試行番号、遅延秒数のみ。
 - `delivery_discarded`: 試行上限、不正形式、期限外、権限失効、端末の停止・更新による不一致を固定の理由で区別する。
 - アカウント、インストール、端末、通知、APNs の ID、指紋、トークン、暗号文、署名鍵、JWT、所有確認 code、外部の応答本文、例外の値は新しい集計へ含めない。既存の例外名・掃除失敗のアカウントIDのログも除く。
-- invocation logs と traces は引き続き無効にする。プラットフォームが付ける metadata までアプリのテストで安全と証明したとはみなさず、実環境で別に確認する。認証ヘッダーの自動秘匿には依存しない。
+- `redact_query_string = true` でプラットフォームが残す URL から query を除く。invocation logs と traces は引き続き無効にする。プラットフォームが付ける metadata までアプリのテストで安全と証明したとはみなさず、実環境で別に確認する。認証ヘッダーの自動秘匿には依存しない。
 
 ## 警報の判定
 
@@ -48,3 +48,7 @@ Queue の閾値は、5xx の初回990秒と次の1980秒、通信の待ち時間
 - [Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/): オブジェクトのログと invocation logs の無効化
 - [Monitors](https://developers.cloudflare.com/notifications/monitors/): 定期 query と検知・通知
 - [Telemetry query API](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/): 現行の必要権限は Workers Observability Write
+
+## 実環境の metadata (2026-11-04)
+
+専用の観測用トークンで実環境の集計 API が200になった。既存のアプリログ2件の metadata には HTTP method・URL・path があり、headers はなかった。アプリのログを限定してもプラットフォーム側の URL が消えるとは限らないため、query の秘匿設定を明示する。path は引き続き残りうる。URL に資格情報を載せない API 契約は維持し、任意の path を含めた完全な匿名化を達成したとはしない。
