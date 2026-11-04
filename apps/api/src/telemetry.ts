@@ -25,6 +25,7 @@ const Telemetry = z.discriminatedUnion("event", [
   z.object({
     event: z.literal("queue_state"),
     backlog_count: z.int().nonnegative(),
+    backlog_bytes: z.int().nonnegative(),
     oldest_age_seconds: z.int().nonnegative(),
   }),
   z.object({
@@ -48,6 +49,12 @@ export function recordTelemetry(event: z.input<typeof Telemetry>): void {
         data.status === 403 || (data.event === "http_request" && data.status === 401),
       ),
       throttled_count: Number(data.status === 429),
+    });
+  } else if (data.event === "queue_state") {
+    // SQLの複合JSON条件が再帰制限で拒まれるため、検証済みの2値から判定だけを作る (#39)。
+    console.info({
+      ...data,
+      backlog_present: Number(data.backlog_count > 0 || data.backlog_bytes > 0),
     });
   } else console.info(data);
 }

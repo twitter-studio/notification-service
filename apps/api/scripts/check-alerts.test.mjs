@@ -9,7 +9,7 @@ const healthy = {
   window_seconds: 300,
   http: { total: 0, unauthorized: 0, forbidden: 0, throttled: 0, failed: 0 },
   apns: { total: 0, auth_failed: 0, throttled: 0, failed: 0, exhausted: 0 },
-  queue: { backlog: 0, oldest_age_seconds: 0 },
+  queue: { backlog: 0, backlog_bytes: 0, oldest_age_seconds: 0 },
 };
 for (const [name, input, expected] of [
   ["正常", JSON.stringify(healthy), 0],

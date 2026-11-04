@@ -17,17 +17,49 @@ describe("Queueの定期監視", () => {
       {
         metrics: async () => ({
           backlogCount: age === 0 ? 0 : 1,
-          backlogBytes: 100,
+          backlogBytes: age === 0 ? 0 : 100,
           ...(age === 0 ? {} : { oldestMessageTimestamp: new Date(1000) }),
         }),
       },
       1000 + age * 1000,
     );
     expect(info.mock.calls).toEqual([
-      [{ event: "queue_state", backlog_count: age === 0 ? 0 : 1, oldest_age_seconds: age }],
+      [
+        {
+          event: "queue_state",
+          backlog_count: age === 0 ? 0 : 1,
+          backlog_bytes: age === 0 ? 0 : 100,
+          backlog_present: age === 0 ? 0 : 1,
+          oldest_age_seconds: age,
+        },
+      ],
     ]);
   });
-  it.each(["error", "unknown_oldest"])(
+  it("件数0でもbytesと最古時刻が残ればageを保持する", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    await recordQueueMetrics(
+      {
+        metrics: async () => ({
+          backlogCount: 0,
+          backlogBytes: 559,
+          oldestMessageTimestamp: new Date(1000),
+        }),
+      },
+      3301000,
+    );
+    expect(info.mock.calls).toEqual([
+      [
+        {
+          event: "queue_state",
+          backlog_count: 0,
+          backlog_bytes: 559,
+          backlog_present: 1,
+          oldest_age_seconds: 3300,
+        },
+      ],
+    ]);
+  });
+  it.each(["error", "unknown_oldest", "bytes_unknown_oldest", "invalid_bytes"])(
     "%sを正常な空のQueueとせず、秘密も記録しない",
     async (kind) => {
       const info = vi.spyOn(console, "info").mockImplementation(() => {});
@@ -36,7 +68,10 @@ describe("Queueの定期監視", () => {
         {
           metrics: async () => {
             if (kind === "error") throw new Error("private-canary");
-            return { backlogCount: 1, backlogBytes: 100 };
+            return {
+              backlogCount: kind === "bytes_unknown_oldest" ? 0 : 1,
+              backlogBytes: kind === "invalid_bytes" ? -1 : 100,
+            };
           },
         },
         1000,
@@ -66,6 +101,14 @@ it("5分のCronはQueue監視を実行し、空の状態を記録する", async 
   await waitOnExecutionContext(ctx);
   expect(metrics).toHaveBeenCalledTimes(1);
   expect(info.mock.calls).toEqual([
-    [{ event: "queue_state", backlog_count: 0, oldest_age_seconds: 0 }],
+    [
+      {
+        event: "queue_state",
+        backlog_count: 0,
+        backlog_bytes: 0,
+        backlog_present: 0,
+        oldest_age_seconds: 0,
+      },
+    ],
   ]);
 });
