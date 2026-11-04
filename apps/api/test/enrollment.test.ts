@@ -7,7 +7,7 @@ import {
   revokeInstallation,
 } from "@notification-service/db";
 import { describe, expect, it, vi } from "vitest";
-import { createApp, MAX_BODY_BYTES } from "../src/app";
+import { createApp, MAX_ENROLLMENT_BODY_BYTES } from "../src/app";
 import { hashBearerToken } from "../src/security/bearer";
 import { issueChallenge, loadChallengeKey } from "../src/security/challenge";
 import { fromBase64Url, toBase64Url } from "../src/security/encoding";
@@ -340,7 +340,7 @@ describe("端末の登録", () => {
       422,
     );
     await expectProblem(
-      await post("/v1/enrollments", { padding: "x".repeat(MAX_BODY_BYTES) }),
+      await post("/v1/enrollments", { padding: "x".repeat(MAX_ENROLLMENT_BODY_BYTES) }),
       413,
     );
   });

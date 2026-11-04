@@ -15,6 +15,8 @@ import { registerEnrollment } from "./routes/enrollment";
 import { registerHealth } from "./routes/health";
 import { registerNotifications, SEND_BUDGET_MS } from "./routes/notifications";
 import { registerSettings } from "./routes/settings";
+import type { AppAttestVerifier } from "./security/app-attest/registration";
+import { appleAppAttest } from "./security/app-attest/verifier";
 import { recordTelemetry } from "./telemetry";
 
 export type AppEnv = { Bindings: Env; Variables: { requestId: string } };
@@ -33,6 +35,8 @@ export type RelayEnv = {
 
 /** 本文の大きさの上限 (設計書 §4)。 */
 export const MAX_BODY_BYTES = 4 * 1024;
+export const MAX_ENROLLMENT_BODY_BYTES = 96 * 1024;
+export const MAX_SESSION_BODY_BYTES = 16 * 1024;
 
 /** Hono が投げる HTTPException (壊れた JSON の 400、違う Content-Type の 415 など) の題。 */
 const CLIENT_ERROR_TITLES: Partial<Record<number, string>> = {
@@ -56,6 +60,7 @@ const requestId = createMiddleware<AppEnv>(async (c, next) => {
 });
 
 export type AppOptions = {
+  appAttestVerifier?: AppAttestVerifier;
   /** 端末の確かめの push を送る。既定では送らない。entrypoint は APNs の実装を渡し、テストでは差し替える。 */
   sendDeviceVerification?: DeviceVerificationSender;
   /** 端末へ通知を送る。既定では送らない。entrypoint は APNs の実装を渡し、テストでは差し替える。 */
@@ -78,9 +83,16 @@ export function createApp(options: AppOptions = {}) {
     await next();
     c.header("Cache-Control", "no-store");
   });
-  app.use(
-    "/v1/*",
-    bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => problem(c, 413, "Content Too Large") }),
+  app.use("/v1/*", (c, next) =>
+    bodyLimit({
+      maxSize:
+        c.req.path === "/v1/enrollments"
+          ? MAX_ENROLLMENT_BODY_BYTES
+          : c.req.path === "/v1/sessions"
+            ? MAX_SESSION_BODY_BYTES
+            : MAX_BODY_BYTES,
+      onError: (context) => problem(context, 413, "Content Too Large"),
+    })(c, next),
   );
   // 認証の形 (OpenAPI の文書に書く)。どちらも Authorization: Bearer で送る。
   app.openAPIRegistry.registerComponent("securitySchemes", "session", {
@@ -94,7 +106,7 @@ export function createApp(options: AppOptions = {}) {
     description: "中継の資格情報 (tsr_…。利用者の Worker が使う。ADR-0007)",
   });
   registerHealth(app);
-  registerEnrollment(app);
+  registerEnrollment(app, options.appAttestVerifier ?? appleAppAttest);
   registerRelayCredentials(app);
   registerSettings(app, options.push ?? notConfiguredPushGateway);
   registerDevices(app, options.sendDeviceVerification ?? notConfiguredVerificationSender);

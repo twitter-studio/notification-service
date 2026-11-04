@@ -95,3 +95,8 @@ Status: Accepted / 2026-11-04
 - 秘密 `CHALLENGE_SIGNING_KEY` と `ENROLLMENT_INVITE_CODE` は、本番の Worker を作るときにオーナーが置く。
 - 本番の Worker を作る前に、Rate Limiting のバインディングが使えるプランかを確かめる。
 - 定期の掃除で、期限を過ぎた使ったチャレンジとセッションの記録も消す。
+
+
+## AUTH-003による更新
+
+App Attestの初回証明、再登録とセッション更新のassertion、招待制からの切り替えは[ADR-0014](0014-app-attest.md)で定める。以下の試作時の制限は、ADR-0014の`invite_only`モードに適用する。

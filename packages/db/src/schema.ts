@@ -65,6 +65,31 @@ export const installations = sqliteTable(
   ],
 );
 
+/** App Attestで確かめた鍵。秘密のreceiptは用途とkey IDに結び付けた暗号文だけを置く。 */
+export const installationAttestations = sqliteTable(
+  "installation_attestations",
+  {
+    installationId: text("installation_id")
+      .primaryKey()
+      .references(() => installations.id),
+    keyId: text("key_id").notNull().unique(),
+    publicKey: text("public_key").notNull(),
+    counter: integer("counter").notNull(),
+    appId: text("app_id").notNull(),
+    environment: text("environment", { enum: ["development", "production"] }).notNull(),
+    receiptCiphertext: text("receipt_ciphertext").notNull(),
+  },
+  (t) => [
+    check("attestations_counter", sql`${t.counter} BETWEEN 0 AND 4294967295`),
+    check("attestations_environment", sql`${t.environment} IN ('development', 'production')`),
+    check("attestations_receipt_ciphertext", sql`${t.receiptCiphertext} GLOB 'ar1.*'`),
+    check(
+      "attestations_key_id",
+      sql`length(${t.keyId}) = 43 AND ${t.keyId} NOT GLOB '*[^A-Za-z0-9_-]*'`,
+    ),
+  ],
+);
+
 export const devices = sqliteTable(
   "devices",
   {

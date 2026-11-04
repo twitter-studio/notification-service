@@ -52,6 +52,7 @@
     "crons": ["17,27,37,47 18 * * *", "*/5 * * * *"]
   },
   "vars": {
+    "APP_ATTEST_POLICY": "{\"mode\":\"invite_only\",\"appId\":\"PU5HXZ4FZ2.com.twitter-studio.Tweetbot\",\"environment\":\"development\",\"bundleVersions\":[\"1\"]}",
     // 端末の登録で受け付ける topic (Bundle ID)。カンマ区切り (ADR-0008)。
     "APNS_TOPICS": "com.twitter-studio.Tweetbot",
     // sandbox の鍵の確かめの値 (秘密ではない。ADR-0005)。鍵の値は Cloudflare secret に置く。

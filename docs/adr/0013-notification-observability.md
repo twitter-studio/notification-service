@@ -68,3 +68,5 @@ API Tokens の権限は Workers Observability Edit に加え、オーナーが A
 隔離した実Queueで、再送待ちのデータが残る間に件数0・bytes559・最古時刻ありを観測した。後の読み取りでは件数1となった。APIは分散したbest-effortの概算値であるため、件数だけでageを0へ変えない (#39)。件数とbytesは観測値のまま記録し、どちらかが正なら最古時刻からageを計算する。最古時刻が不明なら取得不能とする。CLIと定期監視も両方を判定に使う。識別子・内容は追加しない。
 
 SQL内へJSONのOR条件を増やすと422 `recursion limit exceeded` になった。浅いOR条件は200、JSON値の加算は422、判定済みの単一数値属性は200だった。検証済みの件数・bytesから `backlog_present` の0/1だけを導出し、native監視はこれを比較する。呼び出し元が渡す `backlog_present` は使わない。件数やbytesの実測値は書き換えない。
+
+App Attestのassertion拒否では、固定の処理段階（decode / authenticator / counter / signature_format / signature_check）だけを記録する。署名、key ID、receipt、入力と例外は記録しない。

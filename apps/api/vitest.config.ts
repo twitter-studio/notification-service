@@ -25,6 +25,12 @@ export default defineConfig(async () => {
           },
           bindings: {
             TEST_MIGRATIONS: migrations,
+            APP_ATTEST_POLICY: JSON.stringify({
+              mode: "invite_only",
+              appId: "TESTTEAM01.com.example.attest",
+              environment: "development",
+              bundleVersions: ["1"],
+            }),
             QA_MIGRATIONS: qaMigrations,
             APNS_PROVIDER_KEYS: "",
             // テストだけの鍵 (本物の秘密ではない)。本物の鍵は Cloudflare の秘密に置く (ADR-0005)。
