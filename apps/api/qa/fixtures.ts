@@ -23,7 +23,7 @@ export const CASES = [
   "bad-token400",
   "unregistered410",
 ] as const;
-const isolateId = crypto.randomUUID();
+let isolateId: string | undefined;
 let current: { configuration: string | undefined; client: ApnsClient } | undefined;
 
 export function gateway(env: LabEnv) {
@@ -64,6 +64,7 @@ export function gateway(env: LabEnv) {
                 : count === 0
                   ? 429
                   : 200;
+      isolateId ??= crypto.randomUUID();
       await env.DB.prepare(
         "INSERT INTO qa_attempts(name,status,started_at,jwt_issued_at,isolate_id) VALUES(?,?,?,?,?)",
       )
