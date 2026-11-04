@@ -7,6 +7,7 @@ import {
   cleanupExpiredAuthRecords,
   cleanupStaleDevices,
 } from "./maintenance";
+import { recordQueueMetrics } from "./queue-metrics";
 
 let currentClient: { configuration: string | undefined; client: ApnsClient } | undefined;
 const applications = new WeakMap<
@@ -72,6 +73,10 @@ export default {
     }
   },
   async scheduled(controller, env, ctx) {
+    if (controller.cron === "*/5 * * * *") {
+      ctx.waitUntil(recordQueueMetrics(env.APNS_RETRIES, controller.scheduledTime));
+      return;
+    }
     const cleanup =
       controller.cron === CLEANUP_CRON
         ? CLEANUPS[new Date(controller.scheduledTime).getUTCMinutes()]
