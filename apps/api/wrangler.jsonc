@@ -9,8 +9,8 @@
     {
       "binding": "DB",
       "database_name": "notification-service",
-      // 手元とテスト用の仮の ID。本番の D1 はオーナーの承認を得てから作り、ここを本物の ID にする (仮の ID のままではデプロイできない)。
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // オーナーが承認した sandbox 検証用の D1 (2026-11-04)。
+      "database_id": "b19c69b6-066d-4cf0-a0c0-8274ae6f2d3d",
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
@@ -54,11 +54,10 @@
   "vars": {
     // 端末の登録で受け付ける topic (Bundle ID)。カンマ区切り (ADR-0008)。
     "APNS_TOPICS": "com.twitter-studio.Tweetbot",
-    // 鍵の確かめの値 (秘密ではない。ADR-0005)。本番の鍵を作ったら、scripts/key-check.mjs で作った値に置き換える。
-    // 空のままでは、鍵を読むときに失敗する (確かめずに鍵を使わないため)。
-    "DEVICE_TOKEN_KEY_CHECKS": "{\"fingerprint\":\"\",\"keys\":{}}"
+    // sandbox の鍵の確かめの値 (秘密ではない。ADR-0005)。鍵の値は Cloudflare secret に置く。
+    "DEVICE_TOKEN_KEY_CHECKS": "{\"fingerprint\":\"a0060dbb57486aa9\",\"keys\":{\"sandbox-20261104\":\"54a78f72b1bcee14\"}}"
   },
-  // Queue の実リソースと運営 API の配置は、オーナーの承認後に作る。
+  // オーナーが承認した sandbox 検証用の再送 Queue。保存は24時間に制限する。
   "queues": {
     "producers": [{ "binding": "APNS_RETRIES", "queue": "notification-apns-retries" }],
     "consumers": [{ "queue": "notification-apns-retries", "max_batch_size": 1, "max_retries": 1 }]

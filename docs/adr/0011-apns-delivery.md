@@ -58,3 +58,7 @@ Status: Accepted / 2026-11-04
 - [Cloudflare: Queues limits](https://developers.cloudflare.com/queues/platform/limits/)
 - [Cloudflare: retries and delays](https://developers.cloudflare.com/queues/configuration/batching-retries/)
 - [Cloudflare: invocation logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)
+
+## 初期配置
+
+2026-11-04、オーナーの明示承認と今回限りの CLI 配置の例外承認を受け、sandbox 検証用の構成を配置した。[配置の記録](../verification/2026-11-04-sandbox-deployment.md) を参照。production と今後の別の配置は、この承認に含めない。
