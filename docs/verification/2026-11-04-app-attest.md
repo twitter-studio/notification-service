@@ -6,7 +6,8 @@
 
 - API: lint、typecheck、workerd 323件、運用スクリプト4件、dry-run buildが成功。probeの既存14件とCLI 5件も成功。
 - D1: 通常・QAの両Drizzle構成で再生成差分なし。初回登録、pendingからの昇格、counterの同時更新、アカウント削除競合、鍵置換と送信前切断からの回復を検証。
-- iOS: XcodeMCPKitでビルドし、714件がすべて成功。未実行・失敗なし。Secure Enclave署名の既存テストに加え、App Attestの保存・再起動、一時障害、invalidKey、428からの回復を検証。
+- iOS: XcodeMCPKitでビルドし、715件がすべて成功。未実行・失敗なし。Secure Enclave署名の既存テストに加え、App Attestの保存・再起動、一時障害、invalidKey、428からの回復を検証。
+- SimulatorのDeviceCheck対応判定で一度クラッシュしたため、未対応のSimulatorではAPIを呼ばない分岐を加えた（[Tweetbot #397](https://github.com/twitter-studio/tweetbot/issues/397)）。回避後の全715件が成功。
 - 独立したコードレビューとセキュリティレビューの指摘を修正して再確認済み。合成CA・鍵による検証であり、Apple実機との互換性の証明ではない。
 
 ## 次の操作（オーナー承認前、未実行）
