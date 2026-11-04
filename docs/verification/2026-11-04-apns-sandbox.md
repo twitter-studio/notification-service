@@ -18,17 +18,17 @@
 
 ## 観測結果
 
-| 項目 | 結果 |
-| --- | --- |
-| 送信開始 | 2026-11-04 04:13:30.898 UTC (13:13:30.898 JST) |
-| APNs status | 200 |
-| request ID / apns-id | `ec3417e1-2d2d-4bd5-8dc6-27566bd77633` |
-| APNs reason | なし |
-| APNs 応答までの経過時間 | 473 ms (Worker 内の計測。CPU 時間や実機到達までの時間ではない) |
-| 実機への到達 | オーナーが iPhone 16 の検証通知を確認 |
-| HTTP の版 | `Response` では取得できない (`not_exposed`) |
-| CPU 時間 | P50 / P99 ともに 5.846 ms (生値5846 µs) |
-| Workers の要求 / subrequest / エラー | 1 / 1 / 0 |
+| 項目                                 | 結果                                                           |
+| ------------------------------------ | -------------------------------------------------------------- |
+| 送信開始                             | 2026-11-04 04:13:30.898 UTC (13:13:30.898 JST)                 |
+| APNs status                          | 200                                                            |
+| request ID / apns-id                 | `ec3417e1-2d2d-4bd5-8dc6-27566bd77633`                         |
+| APNs reason                          | なし                                                           |
+| APNs 応答までの経過時間              | 473 ms (Worker 内の計測。CPU 時間や実機到達までの時間ではない) |
+| 実機への到達                         | オーナーが iPhone 16 の検証通知を確認                          |
+| HTTP の版                            | `Response` では取得できない (`not_exposed`)                    |
+| CPU 時間                             | P50 / P99 ともに 5.846 ms (生値5846 µs)                        |
+| Workers の要求 / subrequest / エラー | 1 / 1 / 0                                                      |
 
 CPU 時間は、Cloudflare GraphQL Analytics API の `workersInvocationsAdaptive` を使い、`scriptName = notification-apns-probe`、04:13:00〜04:14:00 UTC で取得した。04:13:31 UTC の `success` が1行、要求1件。取得時刻は04:14:03 UTC。P50 と P99 はこの1件を含む集計の値であり、繰り返し測定による性能評価や、通常運用の費用見積もりではない。
 
