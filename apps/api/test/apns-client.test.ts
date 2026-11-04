@@ -21,6 +21,11 @@ function request(): ApnsRequest {
 }
 
 describe("APNs の直接送信", () => {
+  it("本物の Workers fetch で APNs の応答を受け取れる", async () => {
+    const config = await signingConfiguration();
+    expect(await new ApnsClient(config.json).deliver(request())).toEqual({ kind: "sent" });
+  });
+
   it("P-256 の実署名を検証できる ES256 JWT と固定 endpoint の要求を送る", async () => {
     const config = await signingConfiguration();
     const received: { url: string; init: RequestInit | undefined }[] = [];
