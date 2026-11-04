@@ -51,9 +51,23 @@ Python urllib の既定 User-Agent での health 確認は、Worker 到達前の
 
 APNS-001 の一時 probe Worker は削除済み。ここに記録した運営 API は、オーナーが承認した検証用構成として保持する。他の Worker は変更していない。
 
+## iOS の登録と所有確認
+
+同日、iPhone 16 の自動署名ビルドで招待登録と端末登録が成功した。当初は未確認のままで、Workers Logs の既存のエラーは `apns_transport_or_signing_failed` だった。秘密の値や送信先 URL は出力しなかった。
+
+クラスに保存した Workers の `fetch` の呼び出し元が globalThis でない問題を、通信関数を置き換えない workerd のテストで再現した。[PR #29](https://github.com/twitter-studio/notification-service/pull/29) (049bc39) で修正した。独立したコード／セキュリティレビューと GitHub Codex レビューは指摘なし、CI・lint・型チェック・Workers 259件と CLI 5件のテスト・dry-run が成功した。
+
+修正後の main を、承認済みの sandbox 検証の範囲で配置した。稼働 version は `6f3c3660-e3bd-4139-aa0c-50a549dffdc1`、health は200。招待コードや APNs 鍵、権限、リソースは追加していない。
+
+[Tweetbot PR #393](https://github.com/twitter-studio/tweetbot/pull/393) (084cf22) で `verification_sent: false` と送信後の待機を区別した。自動署名の実機／Simulator ビルドと665件のテストが成功、独立したコード／セキュリティレビューと GitHub Codex レビューは指摘なし。実機で未送信の日本語表示を確認できた。
+
+反映後に実機から登録を1回再試行した。所有確認用の background push を iPhone が受信し、確認コードを API に返した。D1 の集計は確認済みの端末1台、実機の配信状態は「オン」、未送信・待機・失敗の表示は消えた。コード、トークン、資格情報を取り出して代わりに検証する方法は使っていない。
+
+この結果は運営アダプターと iOS の所有確認 callback の実環境での往復を示す。通常の alert 通知の表示・タップと、Queue を使う実環境の再送を確認した結果ではない。
+
 ## 残るゲート
 
-この配置だけで APNS-002 や IOS-001 の実機確認を完了とはしない。iOS の所有確認 callback・通知タップ・API 接続、実アダプターでの sandbox 到達、再送 Queue の実環境検証と費用・ログの確認が残る。Issue #8 と Tweetbot #366 を開いたままにする。
+この配置だけで APNS-002 や IOS-001 の実機確認を完了とはしない。通常の alert 通知と通知タップ、設定取得・削除・テスト通知の API 接続、再送 Queue の実環境検証と費用・ログの確認が残る。Issue #8 と Tweetbot #366 を開いたままにする。
 
 ## 根拠
 
