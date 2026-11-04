@@ -50,6 +50,16 @@ export function retryDelay(base: number, attempt: number, random = Math.random):
   return exponential + Math.floor(exponential * 0.1 * random());
 }
 
+type GatewayEnv = Pick<
+  Env,
+  | "DB"
+  | "APNS_RETRIES"
+  | "APNS_PROVIDER_KEYS"
+  | "DEVICE_TOKEN_KEYS"
+  | "DEVICE_TOKEN_FINGERPRINT_KEY"
+  | "DEVICE_TOKEN_KEY_CHECKS"
+>;
+
 export class ApnsPushGateway {
   readonly push: PushGateway;
   readonly sendDeviceVerification: DeviceVerificationSender;
@@ -58,7 +68,7 @@ export class ApnsPushGateway {
   private readonly queue: Pick<Queue, "send">;
 
   constructor(
-    private readonly env: Env,
+    private readonly env: GatewayEnv,
     options: {
       send?: typeof fetch;
       now?: () => number;

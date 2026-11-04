@@ -1,0 +1,37 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "notification-qa-faults",
+  "main": "../src/qa-lab.ts",
+  "compatibility_date": "2026-10-29",
+  "send_metrics": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "notification-qa-faults",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "queues": {
+    "producers": [{ "binding": "APNS_RETRIES", "queue": "notification-qa-faults" }],
+    "consumers": [
+      {
+        "queue": "notification-qa-faults",
+        "max_batch_size": 1,
+        "max_concurrency": 1,
+        "max_retries": 1
+      }
+    ]
+  },
+  "vars": { "QA_MODE": "isolated-synthetic", "QA_DEADLINE": "0" },
+  "ratelimits": [
+    { "name": "QA_RATE_LIMITER", "namespace_id": "1099", "simple": { "limit": 120, "period": 60 } }
+  ],
+  "limits": { "cpu_ms": 1000 },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": false }
+  }
+}
