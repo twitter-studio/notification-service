@@ -79,13 +79,13 @@ APNS-001 の一時 probe Worker は削除済み。ここに記録した運営 AP
 
 コードレビューとセキュリティレビューを受けた一時スクリプトで、空の `notification-apns-retries` に60秒遅延の通知を1件だけ投入した。Cloudflare の既存の承認済み CLI 認証を使い、sandbox・指定 topic・有効かつ確認済みの端末が1台だけであることを確認してから実行した。
 
-D1 から読んだのはアカウント・インストール・端末の ID、指紋、環境、topic のみ。平文トークン、暗号文、セッション、署名鍵は取得していない。ジョブは通常の consumer の形式と、固定の test 通知の payload を使う。秘密や指紋の値を出力・保存していない。投入前の backlog_count と backlog_bytes は0、API は成功を返し、返却された metadata の backlog_bytes は559だった。metrics は best-effort のため、直後の backlog_count の0だけで処理済みとはみなさない。
+D1 から読んだのはアカウント・インストール・端末の ID、指紋、環境、topic のみ。平文トークン、暗号文、セッション、署名鍵は取得していない。ジョブは通常の consumer の形式と、固定の test 通知の payload を使う。秘密や指紋の値をログやローカルファイルに出力・保存していない。投入前の backlog_count と backlog_bytes は0、API は成功を返し、返却された metadata の backlog_bytes は559だった。metrics は best-effort のため、直後の backlog_count の0だけで処理済みとはみなさない。
 
-これは管理 API からの1件の経路確認で、アプリ API の回数制限・日次枠は通していない。consumer は通常どおり、D1 でインストールと端末の権限を再確認する。初回の APNs 障害による Queue 投入や指数バックオフを実環境で再現した結果ではない。到達と消費後の metrics は別に確認する。
+これは管理 API からの1件の経路確認で、アプリ API の回数制限・日次枠は通していない。consumer は通常どおり、D1 でインストールと端末の権限を再確認する。初回の APNs 障害による Queue 投入や指数バックオフを実環境で再現した結果ではない。その後、Queue metrics の backlog_count と backlog_bytes が0に戻り、オーナーが通常テストとは別の追加通知の表示を iPhone 16 で確認した。これにより、実 consumer での D1 読み直し・復号・APNs 送信から実機表示までの経路を確認できた。
 
 ## 残るゲート
 
-APNS-002 の実際の Queue consumer を経由する到達と、実環境での再送・費用・ログの確認が残る。Issue #8 は開いたままにする。通常の HTTP 200 と実機表示だけから、障害後の再送まで成功したとはみなさない。通知タップは Tweetbot #367 で追跡する。
+APNS-002 の JWT・応答分類・上限付き再送の自動テストと、通常の通知および実 Queue consumer 経由の sandbox 到達を確認し、Issue #8 の受け入れ条件を満たした。実環境で初回 APNs を429/5xxにして自動で Queue に入り、再試行・打ち切りまで進む試験はしていない。障害時の実環境試験、負荷・費用・ログとアラートの確認は QA-001 (service #9) に残す。通常の HTTP 200 と実機表示だけから、障害後の再送まで成功したとはみなさない。通知タップは Tweetbot #367 で追跡する。
 
 ## 根拠
 
