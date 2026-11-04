@@ -65,9 +65,27 @@ APNS-001 の一時 probe Worker は削除済み。ここに記録した運営 AP
 
 この結果は運営アダプターと iOS の所有確認 callback の実環境での往復を示す。通常の alert 通知の表示・タップと、Queue を使う実環境の再送を確認した結果ではない。
 
+## 設定 API と通常の通知
+
+[service PR #31](https://github.com/twitter-studio/notification-service/pull/31) (b97e51680afb70b8eddb68575e774a6adf7a5646) で設定取得・削除・テスト通知の3入口と ADR-0012 を追加した。マージ後の main を、承認済みの sandbox 検証として配置した。稼働 version は `c199c2fa-69d9-494e-88df-150fdcee67bb`。配置直前に Queue metrics の backlog_count と backlog_bytes が0であることを確認し、旧形式の仕事を残さず更新した。health は200、新しい3入口は未認証の要求に401を返した。
+
+[Tweetbot PR #394](https://github.com/twitter-studio/tweetbot/pull/394) (4973bdd343d9d395d9ff5aa17e513cf43b312324) でクライアントを再生成し、設定取得・削除・テスト通知、前面での通知表示と、OS が読む英語・日本語の通知文を接続した。自動署名の実機／Simulator ビルド、iOS 670件、Workers 271件と CLI 5件のテストが成功した。独立したコード／セキュリティレビューと GitHub Codex レビューを受け、指摘を修正した。旧 Queue 形式の読み替えを足さない判断と配置条件は ADR-0012 に記録した。
+
+実機で日本語・英語の設定画面と配信「オン」を確認した。停止・再有効化でも、実機表示と D1 の状態が一致した。実機のテスト通知ボタンから1回送信し、画面の sent 応答と日次枠の集計1件を確認した。その後、オーナーが iPhone 16 で通常の通知が表示されたことを確認した。これは独立 probe ではなく、運営 API と本アダプターを通した結果。
+
+許可拒否、トークンの更新、再インストール、アカウント削除後の状態は自動テストで確認した。実機の通知アカウントは保持し、削除操作は行っていない。IOS-001 の受け入れ条件を満たし、Tweetbot #366 と service #24 は完了。通知タップの安全な移動と不正 ID は IOS-002 (Tweetbot #367) に残る。
+
+## 実 Queue consumer の経路確認
+
+コードレビューとセキュリティレビューを受けた一時スクリプトで、空の `notification-apns-retries` に60秒遅延の通知を1件だけ投入した。Cloudflare の既存の承認済み CLI 認証を使い、sandbox・指定 topic・有効かつ確認済みの端末が1台だけであることを確認してから実行した。
+
+D1 から読んだのはアカウント・インストール・端末の ID、指紋、環境、topic のみ。平文トークン、暗号文、セッション、署名鍵は取得していない。ジョブは通常の consumer の形式と、固定の test 通知の payload を使う。秘密や指紋の値を出力・保存していない。投入前の backlog_count と backlog_bytes は0、API は成功を返し、返却された metadata の backlog_bytes は559だった。metrics は best-effort のため、直後の backlog_count の0だけで処理済みとはみなさない。
+
+これは管理 API からの1件の経路確認で、アプリ API の回数制限・日次枠は通していない。consumer は通常どおり、D1 でインストールと端末の権限を再確認する。初回の APNs 障害による Queue 投入や指数バックオフを実環境で再現した結果ではない。到達と消費後の metrics は別に確認する。
+
 ## 残るゲート
 
-この配置だけで APNS-002 や IOS-001 の実機確認を完了とはしない。通常の alert 通知と通知タップ、設定取得・削除・テスト通知の API 接続、再送 Queue の実環境検証と費用・ログの確認が残る。Issue #8 と Tweetbot #366 を開いたままにする。
+APNS-002 の実際の Queue consumer を経由する到達と、実環境での再送・費用・ログの確認が残る。Issue #8 は開いたままにする。通常の HTTP 200 と実機表示だけから、障害後の再送まで成功したとはみなさない。通知タップは Tweetbot #367 で追跡する。
 
 ## 根拠
 
