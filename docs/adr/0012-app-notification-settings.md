@@ -47,3 +47,11 @@ APNs トークン、暗号文、指紋、資格情報の秘密やハッシュ、
 ## 検証
 
 workerd で認証、秘密を含まない設定、署名・用途・チャレンジの使い回し、削除後の認証拒否と他アカウントの維持、未確認・停止・無効端末への送信拒否、回数制限と共通の日次枠、再送の取り消しを確かめる。OpenAPI を生成し直してから iOS のクライアントを生成する。実機の通知表示とタップ、削除の確認はテストとは別に記録する。
+
+## 初期 sandbox の配置条件
+
+今回の Queue 形式の変更では、旧形式を読み替える処理を加えない。まだリリースしておらず、保存形式を変えたときに前のデータの読み替えを作らない規則に従う。旧アダプターで行ったのは Queue を使わない所有確認だけで、利用者の Worker はまだ接続していない。
+
+2026-11-04、配置前の Queue metrics は backlog_count: 0、backlog_bytes: 0、oldest_message_timestamp_ms: 0だった。この metrics は best-effort のため、実際に中継をまだ始めていないことも合わせて確認する。配置の直前にも空であることを確認し、待機中のメッセージがあれば配置を止める。利用者の接続後に形式を変える場合は、待機中の通知の扱いを先に決める。
+
+[Cloudflare Queue metrics](https://developers.cloudflare.com/api/resources/queues/methods/get_metrics/)
