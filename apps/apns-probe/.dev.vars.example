@@ -1,0 +1,6 @@
+# 実際の値は置かない。APNs の .p8 は Mac から出さず、短命の署名済み JWT だけを渡す。
+APNS_PROVIDER_TOKEN=
+# 32 バイトの乱数の Base64URL。検証の呼び出しを認証する。
+PROBE_AUTH_TOKEN=
+# ISO 8601 UTC。検証窓は最長15分。期限後は、認証済みでも送らない。
+PROBE_EXPIRES_AT=

@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "notification-apns-probe",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-29",
+  "send_metrics": false,
+  // APNs の送信先 URL にデバイストークンが入るため、要求や subrequest の自動記録を残さない。
+  "observability": {
+    "enabled": false,
+    "logs": { "enabled": false, "invocation_logs": false },
+    "traces": { "enabled": false }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@notification-service/apns-probe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "wrangler types --check && tsc -p tsconfig.json && tsc -p test/tsconfig.json",
+    "types": "wrangler types --env-file .dev.vars.example",
+    "test": "vitest run && node --test scripts/probe.test.mjs",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "openapi": "vitest run test/openapi.test.ts --update"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "hono": "4.13.14",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.11",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5",
+    "wrangler": "4.156.0"
+  }
+}
