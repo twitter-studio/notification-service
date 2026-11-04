@@ -229,7 +229,7 @@ export function registerNotifications(
         const outcome = await push(
           {
             accountId: credential.accountId,
-            relayCredentialId: credential.id,
+            authority: { kind: "relay", credentialId: credential.id },
             registrationCiphertext: device.apnsTokenCiphertext,
             tokenFingerprint: device.tokenFingerprint,
             deviceId: device.id,

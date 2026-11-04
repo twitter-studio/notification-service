@@ -213,3 +213,19 @@ export async function isRelayCredentialActive(
     .limit(1);
   return rows.length !== 0;
 }
+
+/** 設定に出す自分のアカウントの資格情報。秘密・ハッシュを選択しない。 */
+export async function findCurrentRelayCredential(db: Db, accountId: string, now = new Date()) {
+  const rows = await db
+    .select({ id: relayCredentials.id, expiresAt: relayCredentials.expiresAt })
+    .from(relayCredentials)
+    .where(
+      and(
+        eq(relayCredentials.accountId, accountId),
+        isNull(relayCredentials.revokedAt),
+        or(isNull(relayCredentials.expiresAt), gt(relayCredentials.expiresAt, now)),
+      ),
+    )
+    .limit(1);
+  return rows[0];
+}

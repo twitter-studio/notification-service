@@ -7,9 +7,13 @@ import type { OutgoingNotification } from "./payload";
 
 // 端末へ通知を送る口 (設計書 §5 の PushGateway)。
 
+export type PushAuthority =
+  | { kind: "relay"; credentialId: string }
+  | { kind: "installation"; installationId: string };
+
 export type PushTarget = {
   accountId: string;
-  relayCredentialId: string;
+  authority: PushAuthority;
   tokenFingerprint: DeviceTokenFingerprint;
   registrationCiphertext: DeviceTokenCiphertext;
   deviceId: string;

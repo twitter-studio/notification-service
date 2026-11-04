@@ -1,5 +1,6 @@
 import {
   createDb,
+  findActiveInstallation,
   invalidateDevice,
   isRelayCredentialActive,
   listActiveDevices,
@@ -18,7 +19,7 @@ const Payload = z.strictObject({
     alert: z.strictObject({ "loc-key": z.literal("You have a new notification.") }),
     sound: z.literal("default"),
   }),
-  event_type: z.enum(EVENT_TYPES),
+  event_type: z.enum([...EVENT_TYPES, "test"]),
   post_id: z
     .string()
     .regex(/^[1-9][0-9]{0,18}$/)
@@ -26,7 +27,10 @@ const Payload = z.strictObject({
 });
 const RetryJob = z.strictObject({
   accountId: z.uuid(),
-  relayCredentialId: z.uuid(),
+  authority: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("relay"), credentialId: z.uuid() }),
+    z.strictObject({ kind: z.literal("installation"), installationId: z.uuid() }),
+  ]),
   deviceId: z.uuid(),
   fingerprint: z.string().regex(/^f1\.[A-Za-z0-9_-]{43}$/),
   environment: z.enum(["sandbox", "production"]),
@@ -79,7 +83,7 @@ export class ApnsPushGateway {
       if (result.kind !== "retry") return result;
       const job: Job = {
         accountId: target.accountId,
-        relayCredentialId: target.relayCredentialId,
+        authority: target.authority,
         deviceId: target.deviceId,
         fingerprint: target.tokenFingerprint,
         environment: target.apnsEnvironment,
@@ -139,19 +143,24 @@ export class ApnsPushGateway {
           continue;
         }
         const db = createDb(this.env.DB);
-        if (
-          !(await isRelayCredentialActive(
-            db,
-            { accountId: job.accountId, credentialId: job.relayCredentialId },
-            new Date(this.now()),
-          ))
-        ) {
+        const authority = job.authority;
+        const authorized =
+          authority.kind === "relay"
+            ? await isRelayCredentialActive(
+                db,
+                { accountId: job.accountId, credentialId: authority.credentialId },
+                new Date(this.now()),
+              )
+            : (await findActiveInstallation(db, authority.installationId))?.accountId ===
+              job.accountId;
+        if (!authorized) {
           message.ack();
           continue;
         }
         const device = (await listActiveDevices(db, job.accountId)).find(
           (d) =>
             d.id === job.deviceId &&
+            (authority.kind === "relay" || d.installationId === authority.installationId) &&
             d.tokenFingerprint === job.fingerprint &&
             d.apnsEnvironment === job.environment &&
             d.topic === job.topic,

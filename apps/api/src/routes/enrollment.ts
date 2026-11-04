@@ -45,7 +45,15 @@ const challengeRoute = createRoute({
       content: {
         "application/json": {
           schema: z
-            .object({ purpose: z.enum(["enroll", "session", "relay_credential", "device"]) })
+            .object({
+              purpose: z.enum([
+                "enroll",
+                "session",
+                "relay_credential",
+                "device",
+                "delete_account",
+              ]),
+            })
             .openapi("ChallengeRequest"),
         },
       },

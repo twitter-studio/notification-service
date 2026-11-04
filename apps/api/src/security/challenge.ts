@@ -14,7 +14,12 @@ export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
  */
 export const CLOCK_SKEW_MS = 60 * 1000;
 
-export type ChallengePurpose = "enroll" | "session" | "relay_credential" | "device";
+export type ChallengePurpose =
+  | "enroll"
+  | "session"
+  | "relay_credential"
+  | "device"
+  | "delete_account";
 
 /** チャレンジが壊れている、期限切れ、用途が違う (401)。 */
 export class InvalidChallengeError extends Error {
@@ -29,7 +34,7 @@ export class ChallengeKeyError extends Error {
 const PayloadSchema = z.object({
   v: z.literal(1),
   n: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
-  p: z.enum(["enroll", "session", "relay_credential", "device"]),
+  p: z.enum(["enroll", "session", "relay_credential", "device", "delete_account"]),
   e: z.number().int(),
 });
 

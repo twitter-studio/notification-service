@@ -209,3 +209,41 @@ export async function deleteAbandonedAccount(
   ]);
   return (mark?.results.length ?? 0) > 0;
 }
+
+/** 端末の鍵を確かめた削除。チャレンジ消費・権限の再確認・秘密の削除を同じバッチで行う (ADR-0012)。 */
+export async function deleteAccountFromInstallation(
+  db: Db,
+  input: {
+    accountId: string;
+    installationId: string;
+    challenge: { nonce: string; expiresAt: Date };
+  },
+  now = new Date(),
+): Promise<boolean> {
+  const deletedAccount =
+    "EXISTS (SELECT 1 FROM notification_accounts WHERE id = ?1 AND state = 'deleted')";
+  const installationIds = "SELECT id FROM installations WHERE account_id = ?1";
+  const [, marked] = await db.$client.batch<{ id: string }>([
+    db.$client
+      .prepare("INSERT INTO used_challenges (nonce, expires_at) VALUES (?1, ?2)")
+      .bind(input.challenge.nonce, input.challenge.expiresAt.getTime()),
+    db.$client
+      .prepare(`
+      UPDATE notification_accounts SET state = 'deleted', deleted_at = ?3
+      WHERE id = ?1 AND state = 'active' AND EXISTS (
+        SELECT 1 FROM installations WHERE id = ?2 AND account_id = ?1 AND revoked_at IS NULL
+      ) RETURNING id`)
+      .bind(input.accountId, input.installationId, now.getTime()),
+    // 先に親を deleted にして、取り消されたインストールからは子を消さない。既に deleted の子を掃除してもよい。
+    ...[
+      "DELETE FROM delivery_dedup WHERE account_id = ?1",
+      "DELETE FROM relay_usage WHERE account_id = ?1",
+      `DELETE FROM device_verifications WHERE device_id IN (SELECT id FROM devices WHERE installation_id IN (${installationIds}))`,
+      `DELETE FROM devices WHERE installation_id IN (${installationIds})`,
+      "DELETE FROM relay_credentials WHERE account_id = ?1",
+      "DELETE FROM sessions WHERE account_id = ?1",
+      "DELETE FROM installations WHERE account_id = ?1",
+    ].map((sql) => db.$client.prepare(`${sql} AND ${deletedAccount}`).bind(input.accountId)),
+  ]);
+  return (marked?.results.length ?? 0) > 0;
+}

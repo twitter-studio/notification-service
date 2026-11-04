@@ -47,7 +47,7 @@ export type OutgoingNotification = {
 
 export type NotificationPayload = {
   aps: { alert: { "loc-key": "You have a new notification." }; sound: "default" };
-  event_type: EventType;
+  event_type: EventType | "test";
   post_id?: string;
 };
 
