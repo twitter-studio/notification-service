@@ -59,6 +59,6 @@ Queue の閾値は、5xx の初回990秒と次の1980秒、通信の待ち時間
 
 Queueは既存Workerの5分Cronで `metrics()` を呼び、件数と最古の待機秒数だけを `queue_state` に記録する。取得失敗や最古時刻の欠落は固定の `queue_metrics_unavailable` とし、正常な空の状態にしない。5分Cronは1日288回。要求・CPU・ログの使用量が増えるため招待数拡大前の費用検証に含める。
 
-`ops/notification-monitors.json` は宛先をプレースホルダーにした無効状態の定義。対象は固定アカウントと通知Workerのみ。基本8条件に加え、Queueの観測失敗1件、10分間のQueue heartbeat欠測にも警報を出す。評価は5分ごと、再通知は1時間ごと。実アカウントの `logs.workersLogs` は5分の無効policyを受理した。この結果をLog Explorerの最小10分の制約へ一般化しない。
+`ops/notification-monitors.json` は宛先をプレースホルダーにした無効状態の定義。対象は固定アカウントと通知Workerのみ。基本8条件に加え、Queueの観測失敗1件、10分間のQueue heartbeat欠測にも警報を出す。実アカウントでカスタム監視の上限が5件だったため、条件を変えず、重大異常・HTTP率・APNs率・heartbeat欠測の4系統にまとめる。評価は5分ごと、再通知は1時間ごと。実アカウントの `logs.workersLogs` は5分の無効policyを受理した。この結果をLog Explorerの最小10分の制約へ一般化しない。
 
 API Tokens の権限は Workers Observability Edit に加え、オーナーが Account Analytics Read と Notifications Edit を承認・追加した。秘密は引き続きMacの保護ファイルのみで読む。メール宛先や資格情報を定義ファイルへ書き込まない。定期評価と到達の確認前に、警報運用が完了したとはしない。
