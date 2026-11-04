@@ -14,6 +14,7 @@ export default defineConfig(async () => {
         miniflare: {
           bindings: {
             TEST_MIGRATIONS: migrations,
+            APNS_PROVIDER_KEYS: "",
             // テストだけの鍵 (本物の秘密ではない)。本物の鍵は Cloudflare の秘密に置く (ADR-0005)。
             DEVICE_TOKEN_KEYS: JSON.stringify({
               current: "test-1",

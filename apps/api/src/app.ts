@@ -53,9 +53,9 @@ const requestId = createMiddleware<AppEnv>(async (c, next) => {
 });
 
 export type AppOptions = {
-  /** 端末の確かめの push を送る。APNs へ送る仕組み (APNS-002) ができるまでは、送らない。テストでは差し替える。 */
+  /** 端末の確かめの push を送る。既定では送らない。entrypoint は APNs の実装を渡し、テストでは差し替える。 */
   sendDeviceVerification?: DeviceVerificationSender;
-  /** 端末へ通知を送る。APNs へ送る仕組み (APNS-002) ができるまでは、送らない。テストでは差し替える。 */
+  /** 端末へ通知を送る。既定では送らない。entrypoint は APNs の実装を渡し、テストでは差し替える。 */
   push?: PushGateway;
   /** 1 つのイベントで端末へ送る時間の上限 (ミリ秒)。テストで短くする。 */
   relaySendBudgetMs?: number;

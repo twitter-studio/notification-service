@@ -58,7 +58,14 @@
     // 空のままでは、鍵を読むときに失敗する (確かめずに鍵を使わないため)。
     "DEVICE_TOKEN_KEY_CHECKS": "{\"fingerprint\":\"\",\"keys\":{}}"
   },
+  // Queue の実リソースと運営 API の配置は、オーナーの承認後に作る。
+  "queues": {
+    "producers": [{ "binding": "APNS_RETRIES", "queue": "notification-apns-retries" }],
+    "consumers": [{ "queue": "notification-apns-retries", "max_batch_size": 1, "max_retries": 1 }]
+  },
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": false }
   }
 }

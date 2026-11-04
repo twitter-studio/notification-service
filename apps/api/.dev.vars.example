@@ -14,3 +14,7 @@ ENROLLMENT_INVITE_CODE=
 
 # 鍵の確かめの値 (秘密ではない) は wrangler.jsonc の vars にある。手元の鍵で動かすときは、手元の鍵の値を .dev.vars で上書きする。
 # DEVICE_TOKEN_KEY_CHECKS={"fingerprint":"<値>","keys":{"<鍵の ID>":"<値>"}}
+
+# APNs の署名鍵。環境・topic ごとの配列 (ADR-0011)。未設定では送らない。値は Cloudflare secret だけに置く。
+# [{"environment":"sandbox","topic":"<Bundle ID>","key_id":"<Key ID>","team_id":"<Team ID>","private_key":"<PKCS8 PEM>"}]
+APNS_PROVIDER_KEYS=

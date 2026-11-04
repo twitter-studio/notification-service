@@ -182,3 +182,34 @@ export async function markRelayCredentialUsed(
       ),
     );
 }
+
+/** 再送の前に、受け付けた資格情報の取り消し・期限をアカウント内で確かめる。 */
+export async function isRelayCredentialActive(
+  db: Db,
+  input: { accountId: string; credentialId: string },
+  now = new Date(),
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: relayCredentials.id })
+    .from(relayCredentials)
+    .innerJoin(notificationAccounts, eq(notificationAccounts.id, relayCredentials.accountId))
+    .where(
+      and(
+        eq(relayCredentials.accountId, input.accountId),
+        eq(relayCredentials.id, input.credentialId),
+        isNull(relayCredentials.revokedAt),
+        or(isNull(relayCredentials.expiresAt), gt(relayCredentials.expiresAt, now)),
+        eq(notificationAccounts.state, "active"),
+        exists(
+          db
+            .select({ id: installations.id })
+            .from(installations)
+            .where(
+              and(eq(installations.accountId, input.accountId), isNull(installations.revokedAt)),
+            ),
+        ),
+      ),
+    )
+    .limit(1);
+  return rows.length !== 0;
+}

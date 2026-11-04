@@ -16,10 +16,12 @@ import {
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import {
+  ciphertextOf,
   fingerprintOf,
   newAccount,
   registerToken,
   registerVerified,
+  TOPIC,
   testDb,
   testHash,
   unique,
@@ -239,7 +241,14 @@ describe("使われなくなったアカウント", () => {
     const alice = await newAccount(db);
     const token = unique("token");
     const device = await registerVerified(db, alice, token);
-    await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(token) });
+    await invalidateDevice(db, {
+      deviceId: device,
+      tokenFingerprint: fingerprintOf(token),
+      registrationCiphertext: ciphertextOf(token),
+      invalidatedBefore: new Date(),
+      apnsEnvironment: "sandbox",
+      topic: TOPIC,
+    });
     await setInstallationUsed(alice.installationId, longAgo);
     await env.DB.prepare("UPDATE relay_credentials SET last_used_at = ? WHERE account_id = ?")
       .bind(now.getTime(), alice.accountId)

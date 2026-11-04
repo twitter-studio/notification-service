@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import type { Db } from "./db";
 import type { ConsumedChallenge } from "./enroll";
 import { devices, installations, notificationAccounts } from "./schema";
@@ -291,11 +291,18 @@ export async function enableDeviceByUser(
 
 /**
  * APNs がトークンを無効と返した端末を止める (410 Unregistered など)。送ってから応答までの間にトークンが入れ替わっていたら、
- * 新しいトークンを止めないよう、送ったときのトークンの指紋と合うときだけ止める。
+ * 新しい登録を止めないよう、暗号文・指紋・環境・topic と無効になった時刻も照合する (ADR-0011)。
  */
 export async function invalidateDevice(
   db: Db,
-  input: { deviceId: string; tokenFingerprint: DeviceTokenFingerprint },
+  input: {
+    deviceId: string;
+    tokenFingerprint: DeviceTokenFingerprint;
+    apnsEnvironment: ApnsEnvironment;
+    topic: string;
+    registrationCiphertext: DeviceTokenCiphertext;
+    invalidatedBefore: Date;
+  },
   now = new Date(),
 ): Promise<boolean> {
   const rows = await db
@@ -305,6 +312,10 @@ export async function invalidateDevice(
       and(
         eq(devices.id, input.deviceId),
         eq(devices.tokenFingerprint, input.tokenFingerprint),
+        eq(devices.apnsTokenCiphertext, input.registrationCiphertext),
+        lte(devices.updatedAt, input.invalidatedBefore),
+        eq(devices.apnsEnvironment, input.apnsEnvironment),
+        eq(devices.topic, input.topic),
         eq(devices.state, "active"),
       ),
     )

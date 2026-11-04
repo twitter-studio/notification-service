@@ -191,8 +191,8 @@ export function registerNotifications(
     if (start.kind === "in_progress") throw inProgress();
     const lease = { ...event, leaseId: start.leaseId };
 
-    const outcomes: Partial<Record<PushOutcome | "unreadable" | "skipped", number>> = {};
-    const count = (outcome: PushOutcome | "unreadable" | "skipped") => {
+    const outcomes: Partial<Record<PushOutcome["kind"] | "unreadable" | "skipped", number>> = {};
+    const count = (outcome: PushOutcome["kind"] | "unreadable" | "skipped") => {
       outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
     };
     const deadline = Date.now() + sendBudgetMs;
@@ -228,6 +228,10 @@ export function registerNotifications(
         }
         const outcome = await push(
           {
+            accountId: credential.accountId,
+            relayCredentialId: credential.id,
+            registrationCiphertext: device.apnsTokenCiphertext,
+            tokenFingerprint: device.tokenFingerprint,
             deviceId: device.id,
             apnsToken,
             apnsEnvironment: device.apnsEnvironment,
@@ -236,11 +240,15 @@ export function registerNotifications(
           notification,
           { signal: AbortSignal.timeout(remaining) },
         );
-        count(outcome);
-        if (outcome === "invalid_token")
+        count(outcome.kind);
+        if (outcome.kind === "invalid_token")
           await invalidateDevice(db, {
             deviceId: device.id,
+            registrationCiphertext: device.apnsTokenCiphertext,
+            invalidatedBefore: new Date(outcome.invalidatedBefore),
             tokenFingerprint: device.tokenFingerprint,
+            apnsEnvironment: device.apnsEnvironment,
+            topic: device.topic,
           });
       }
     } catch (error) {
@@ -259,11 +267,11 @@ export function registerNotifications(
     } catch (error) {
       logFailure("relay_complete_failed", error);
     }
-    const incomplete = (["unreadable", "failed", "retry_later", "skipped"] as const).some(
-      (outcome) => (outcomes[outcome] ?? 0) > 0,
-    );
+    const incomplete = (
+      ["unreadable", "failed", "not_configured", "retry_later", "skipped"] as const
+    ).some((outcome) => (outcomes[outcome] ?? 0) > 0);
     // 送れなかった端末があれば、運営が気づけるよう error で出す (鍵の入れ替えの誤り、APNs の止まりなど)。
-    // 今は端末ごとにやり直さないので、その通知は届かない (APNS-002 でやり直しを決める)。
+    // APNs の一時障害は、送り手が端末ごとの遅延再送へ渡す (ADR-0011)。
     (incomplete ? console.error : console.log)(
       JSON.stringify({ event: "relay_delivered", request_id: c.get("requestId"), outcomes }),
     );

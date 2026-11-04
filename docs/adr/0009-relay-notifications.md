@@ -94,3 +94,7 @@ Status: Accepted / 2026-11-04
 - APNs へ送る部分 (APNS-002) は、`PushGateway` を作り、`createApp` に渡す。端末ごとのやり直しと、`apns-collapse-id` (`event_id` を 64 バイトに収める) も決める。
 - 利用者の Worker (USER-001) は、上の約束のとおりにやり直す。
 - アプリ (IOS-001) は、`You have a new notification.` の訳を持ち、`event_type` と `post_id` を確かめてから開く。
+
+## APNS-002 での具体化
+
+[ADR-0011](0011-apns-delivery.md) で直接送信と遅延再送を定めた。一時障害は端末ごとに Queue へ渡し、渡せた結果を `queued` として受け付けを完了する。受理した中継の資格情報の取り消し・入れ替えも、待機中の再送に反映する。古い応答で新しい登録を止めないよう、無効化では登録時の暗号文と APNs の時刻も照合する。

@@ -1,3 +1,5 @@
+import { ApnsClient } from "./apns/client";
+import { ApnsPushGateway } from "./apns/gateway";
 import { createApp } from "./app";
 import {
   cleanupAbandonedAccounts,
@@ -6,7 +8,30 @@ import {
   cleanupStaleDevices,
 } from "./maintenance";
 
-const app = createApp();
+let currentClient: { configuration: string | undefined; client: ApnsClient } | undefined;
+const applications = new WeakMap<
+  Env,
+  { app: ReturnType<typeof createApp>; gateway: ApnsPushGateway; configuration: string | undefined }
+>();
+function application(env: Env) {
+  const configuration = env.APNS_PROVIDER_KEYS;
+  if (currentClient === undefined || currentClient.configuration !== configuration)
+    currentClient = { configuration, client: new ApnsClient(configuration) };
+  let value = applications.get(env);
+  if (value === undefined || value.configuration !== configuration) {
+    const gateway = new ApnsPushGateway(env, { client: currentClient.client });
+    value = {
+      configuration,
+      gateway,
+      app: createApp({
+        push: gateway.push,
+        sendDeviceVerification: gateway.sendDeviceVerification,
+      }),
+    };
+    applications.set(env, value);
+  }
+  return value;
+}
 
 /** 定期の掃除の Cron の式 (wrangler.jsonc の triggers.crons と同じ)。1 つの式で、4 つの分に発火させる。 */
 const CLEANUP_CRON = "17,27,37,47 18 * * *";
@@ -27,7 +52,25 @@ const CLEANUPS: Record<
 
 // 名前付きの export は置かない。Workers では、名前付きの export が別の入口 (entrypoint) として呼べてしまうため。
 export default {
-  fetch: app.fetch,
+  fetch(request, env, ctx) {
+    try {
+      return application(env).app.fetch(request, env, ctx);
+    } catch {
+      console.error(JSON.stringify({ event: "apns_configuration_invalid" }));
+      return new Response(null, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
+  },
+  async queue(batch, env) {
+    try {
+      await application(env).gateway.consume(batch);
+    } catch {
+      console.error(JSON.stringify({ event: "apns_queue_configuration_invalid" }));
+      for (const message of batch.messages) {
+        if (message.attempts < 2) message.retry({ delaySeconds: 900 });
+        else message.ack();
+      }
+    }
+  },
   async scheduled(controller, env, ctx) {
     const cleanup =
       controller.cron === CLEANUP_CRON

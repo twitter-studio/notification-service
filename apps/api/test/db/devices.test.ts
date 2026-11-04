@@ -16,6 +16,7 @@ import {
 } from "@notification-service/db";
 import { describe, expect, it } from "vitest";
 import {
+  ciphertextOf,
   deviceIdOf,
   fingerprintOf,
   issueVerification,
@@ -356,7 +357,14 @@ describe("端末の状態", () => {
     const device = await registerVerified(db, alice, token);
 
     expect(
-      await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(token) }),
+      await invalidateDevice(db, {
+        deviceId: device,
+        tokenFingerprint: fingerprintOf(token),
+        registrationCiphertext: ciphertextOf(token),
+        invalidatedBefore: new Date(),
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
+      }),
     ).toBe(true);
     expect(await listActiveDevices(db, alice.accountId)).toEqual([]);
 
@@ -374,7 +382,14 @@ describe("端末の状態", () => {
     await verifyDevice(db, alice, device);
 
     expect(
-      await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(oldToken) }),
+      await invalidateDevice(db, {
+        deviceId: device,
+        tokenFingerprint: fingerprintOf(oldToken),
+        registrationCiphertext: ciphertextOf(oldToken),
+        invalidatedBefore: new Date(),
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
+      }),
     ).toBe(false);
     expect(await listActiveDevices(db, alice.accountId)).toHaveLength(1);
   });
@@ -493,7 +508,14 @@ describe("使わなくなった端末の掃除", () => {
     const db = testDb();
     const invalidate = async (owner: Owner, deviceId: string, token: string) => {
       await verifyDevice(db, owner, deviceId);
-      await invalidateDevice(db, { deviceId, tokenFingerprint: fingerprintOf(token) });
+      await invalidateDevice(db, {
+        deviceId,
+        tokenFingerprint: fingerprintOf(token),
+        registrationCiphertext: ciphertextOf(token),
+        invalidatedBefore: new Date(),
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
+      });
     };
     const pending = async (owner: Owner, deviceId: string) => {
       await issueVerification(db, owner, deviceId);
@@ -537,7 +559,14 @@ describe("使わなくなった端末の掃除", () => {
     const token = unique("token");
     const device = await registerVerified(db, before, token);
     expect(
-      await invalidateDevice(db, { deviceId: device, tokenFingerprint: fingerprintOf(token) }),
+      await invalidateDevice(db, {
+        deviceId: device,
+        tokenFingerprint: fingerprintOf(token),
+        registrationCiphertext: ciphertextOf(token),
+        invalidatedBefore: new Date(),
+        apnsEnvironment: "sandbox",
+        topic: TOPIC,
+      }),
     ).toBe(true);
     await setUpdatedAt(device, old);
 
