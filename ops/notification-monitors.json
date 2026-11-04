@@ -1,0 +1,102 @@
+[
+  {
+    "name": "Tweetbot sandbox critical",
+    "description": "QA-001 notification-service only; numeric aggregate without notification contents",
+    "alert_type": "custom_analytics",
+    "enabled": false,
+    "mechanisms": {
+      "email": [
+        {
+          "id": "ALERT_EMAIL"
+        }
+      ]
+    },
+    "alert_interval": "1h",
+    "filters": {
+      "source": ["sql_api"],
+      "selectors": [
+        "SELECT COUNT(*) AS value FROM logs.workersLogs WHERE accountTag = '1657a0cfdeed30e3504b6f86cd9575e8' AND scriptName = 'notification-service' AND timestamp >= NOW() - INTERVAL '5' MINUTE AND ((attributes['event'] = 'apns_response' AND attributes['status'] = 403) OR attributes['event'] = 'apns_delivery_exhausted' OR attributes['event'] = 'queue_metrics_unavailable' OR (attributes['event'] = 'queue_state' AND attributes['backlog_count'] > 0 AND attributes['oldest_age_seconds'] >= 3300))"
+      ],
+      "alert_trigger_preferences": ["threshold"],
+      "alert_trigger_preferences_short_window": ["5m"],
+      "alert_trigger_preferences_operator": [">="],
+      "alert_trigger_preferences_value": ["1"],
+      "execution_interval": ["5m"]
+    }
+  },
+  {
+    "name": "Tweetbot sandbox http-rate",
+    "description": "QA-001 notification-service only; numeric aggregate without notification contents",
+    "alert_type": "custom_analytics",
+    "enabled": false,
+    "mechanisms": {
+      "email": [
+        {
+          "id": "ALERT_EMAIL"
+        }
+      ]
+    },
+    "alert_interval": "1h",
+    "filters": {
+      "source": ["sql_api"],
+      "selectors": [
+        "SELECT if((SUM(attributes['server_error_count']) >= 5 AND SUM(attributes['server_error_count']) / if(COUNT(*) = 0, 1, COUNT(*)) >= 0.05) OR (SUM(attributes['auth_error_count']) >= 20 AND SUM(attributes['auth_error_count']) / if(COUNT(*) = 0, 1, COUNT(*)) >= 0.1) OR (SUM(attributes['throttled_count']) >= 10 AND SUM(attributes['throttled_count']) / if(COUNT(*) = 0, 1, COUNT(*)) >= 0.2), 1, 0) AS value FROM logs.workersLogs WHERE accountTag = '1657a0cfdeed30e3504b6f86cd9575e8' AND scriptName = 'notification-service' AND timestamp >= NOW() - INTERVAL '5' MINUTE AND attributes['event'] = 'http_request'"
+      ],
+      "alert_trigger_preferences": ["threshold"],
+      "alert_trigger_preferences_short_window": ["5m"],
+      "alert_trigger_preferences_operator": [">="],
+      "alert_trigger_preferences_value": ["1"],
+      "execution_interval": ["5m"]
+    }
+  },
+  {
+    "name": "Tweetbot sandbox apns-rate",
+    "description": "QA-001 notification-service only; numeric aggregate without notification contents",
+    "alert_type": "custom_analytics",
+    "enabled": false,
+    "mechanisms": {
+      "email": [
+        {
+          "id": "ALERT_EMAIL"
+        }
+      ]
+    },
+    "alert_interval": "1h",
+    "filters": {
+      "source": ["sql_api"],
+      "selectors": [
+        "SELECT if((SUM(attributes['server_error_count']) >= 5 AND SUM(attributes['server_error_count']) / if(COUNT(*) = 0, 1, COUNT(*)) >= 0.05) OR (SUM(attributes['throttled_count']) >= 5 AND SUM(attributes['throttled_count']) / if(COUNT(*) = 0, 1, COUNT(*)) >= 0.1), 1, 0) AS value FROM logs.workersLogs WHERE accountTag = '1657a0cfdeed30e3504b6f86cd9575e8' AND scriptName = 'notification-service' AND timestamp >= NOW() - INTERVAL '5' MINUTE AND attributes['event'] = 'apns_response'"
+      ],
+      "alert_trigger_preferences": ["threshold"],
+      "alert_trigger_preferences_short_window": ["5m"],
+      "alert_trigger_preferences_operator": [">="],
+      "alert_trigger_preferences_value": ["1"],
+      "execution_interval": ["5m"]
+    }
+  },
+  {
+    "name": "Tweetbot sandbox queue-heartbeat-missing",
+    "description": "QA-001 notification-service only; numeric aggregate without notification contents",
+    "alert_type": "custom_analytics",
+    "enabled": false,
+    "mechanisms": {
+      "email": [
+        {
+          "id": "ALERT_EMAIL"
+        }
+      ]
+    },
+    "alert_interval": "1h",
+    "filters": {
+      "source": ["sql_api"],
+      "selectors": [
+        "SELECT COUNT(*) AS value FROM logs.workersLogs WHERE accountTag = '1657a0cfdeed30e3504b6f86cd9575e8' AND scriptName = 'notification-service' AND timestamp >= NOW() - INTERVAL '10' MINUTE AND attributes['event'] = 'queue_state'"
+      ],
+      "alert_trigger_preferences": ["threshold"],
+      "alert_trigger_preferences_short_window": ["10m"],
+      "alert_trigger_preferences_operator": ["<"],
+      "alert_trigger_preferences_value": ["1"],
+      "execution_interval": ["5m"]
+    }
+  }
+]
