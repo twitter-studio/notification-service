@@ -47,7 +47,7 @@ export class ApnsClient {
   private readonly now: () => number;
 
   constructor(json: string | undefined, options: { send?: typeof fetch; now?: () => number } = {}) {
-    this.send = options.send ?? fetch;
+    this.send = options.send ?? fetch.bind(globalThis);
     this.now = options.now ?? Date.now;
     try {
       const keys = Keys.parse(json === undefined || json.trim() === "" ? [] : JSON.parse(json));

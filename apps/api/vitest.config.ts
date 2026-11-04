@@ -12,6 +12,14 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
+          outboundService: (request) => {
+            if (
+              request.url === `https://api.sandbox.push.apple.com/3/device/${"ab".repeat(32)}` &&
+              request.method === "POST"
+            )
+              return new Response(null, { status: 200 });
+            throw new Error("Unexpected outbound request in test");
+          },
           bindings: {
             TEST_MIGRATIONS: migrations,
             APNS_PROVIDER_KEYS: "",
