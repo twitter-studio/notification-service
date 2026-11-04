@@ -114,4 +114,4 @@ pnpm --filter @notification-service/api openapi   # 公開の API の OpenAPI �
 - DB の時刻は、UNIX 時間のミリ秒の整数で持つ (ADR-0004)。生の SQL で `CURRENT_TIMESTAMP` などの文字列の時刻と比べない。
 - DB の読み書きは、アカウントをまたがないよう、条件にアカウントを入れる。テストで、ほかのアカウントに触れないことを確かめる。例外は、アカウントを決めるための読み (`findActiveRelayCredential`。資格情報のハッシュでアカウントが決まる)、サーバーが選んだ端末への APNs の応答 (`invalidateDevice`。トークンの指紋も合わせる)、確かめで、同じトークンを確かめていたほかの行の確かめを外すこと (`markDeviceVerified`。確かめた側が自分のアカウントの有効なインストールのときだけ)、定期の掃除 (`deleteAcceptedEventsBefore`、`deleteStaleDevices`、`findAbandonedAccounts` など) だけ。
 - テストの D1 は、同じファイルのテストどうしで空にならない。ID、ハッシュ、トークンはテストごとに違う値 (`unique()`) にし、ほかのテストの行に頼らない。
-- テストは `apps/api/test/` に置く (設計書 §7 の `tests/{unit,…}` は、workspace に合わせてパッケージの中に置いた)。
+- テストは各 app の `test/` に置く (`apps/api/test/` と `apps/apns-probe/test/`)。設計書 §7 の `tests/{unit,…}` は、workspace に合わせてパッケージの中に置いた。Node.js で実行する運用スクリプトだけは、同じ実行環境の `node --test` で検証する。
