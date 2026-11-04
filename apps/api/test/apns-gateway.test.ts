@@ -120,6 +120,48 @@ async function consume(gateway: ApnsPushGateway, body: unknown, attempts = 1) {
 }
 
 describe("APNs の遅延再送", () => {
+  it.each([429, 503])(
+    "%s の自動 Queue 投入・再送・打ち切りを識別子なしで集計できる",
+    async (status) => {
+      const account = await accountWithDevice();
+      const test = await setup(status);
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(
+          await test.gateway.push(account.target, notification(), {
+            signal: new AbortController().signal,
+          }),
+        ).toEqual({ kind: "queued" });
+        await consume(test.gateway, test.jobs[0], 1);
+        const last = await consume(test.gateway, test.jobs[0], 2);
+        expect(last.result.explicitAcks).toEqual([last.id]);
+        expect(test.send).toHaveBeenCalledTimes(3);
+        expect(info.mock.calls).toContainEqual([
+          expect.objectContaining({ event: "delivery_retry", stage: "queued", attempt: 1 }),
+        ]);
+        expect(info.mock.calls).toContainEqual([
+          expect.objectContaining({ event: "delivery_retry", stage: "requeued", attempt: 2 }),
+        ]);
+        expect(info.mock.calls.filter(([entry]) => entry.event === "apns_response")).toHaveLength(
+          3,
+        );
+        expect(JSON.stringify(error.mock.calls)).toContain("apns_delivery_exhausted");
+        const logs = JSON.stringify([...info.mock.calls, ...error.mock.calls]);
+        for (const secret of [
+          account.target.apnsToken,
+          account.target.registrationCiphertext,
+          account.target.tokenFingerprint,
+          account.target.accountId,
+          account.target.deviceId,
+        ])
+          expect(logs).not.toContain(secret);
+      } finally {
+        info.mockRestore();
+        error.mockRestore();
+      }
+    },
+  );
   it("テスト通知の再送は中継資格情報の取り消しに依存せず、インストールの取り消しには従う", async () => {
     const account = await accountWithDevice();
     const test = await setup();

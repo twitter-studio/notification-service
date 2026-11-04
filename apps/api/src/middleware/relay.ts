@@ -30,12 +30,11 @@ export const requireRelayCredential = createMiddleware<RelayEnv>(async (c, next)
   const marking = markRelayCredentialUsed(db, {
     accountId: credential.accountId,
     credentialId: credential.id,
-  }).catch((error: unknown) => {
+  }).catch(() => {
     console.error(
       JSON.stringify({
         event: "relay_credential_mark_used_failed",
         request_id: c.get("requestId"),
-        name: error instanceof Error ? error.name : "unknown",
       }),
     );
   });

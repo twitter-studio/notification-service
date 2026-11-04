@@ -24,6 +24,7 @@ import type { PushGateway, PushOutcome } from "../notifications/push";
 import { ProblemError } from "../problem";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
 import { enforceRateLimit } from "../security/rate-limit";
+import { recordTelemetry } from "../telemetry";
 import { commonProblems, problemResponse, retryableProblemResponse } from "./openapi";
 
 // 利用者の Worker からイベントを受け付け、そのアカウントの端末へ送る (設計書 §4、API-003、ADR-0009)。
@@ -133,15 +134,27 @@ export function registerNotifications(
       throw new ProblemError(422, "Unprocessable Content", "The event time is out of range.");
 
     const db = createDb(c.env.DB);
-    const logFailure = (event: string, error: unknown) =>
+    const logFailure = (
+      event:
+        | "relay_accept_failed"
+        | "relay_delivery_failed"
+        | "relay_lease_lost"
+        | "relay_complete_failed",
+    ) =>
       console.error(
         JSON.stringify({
           event,
           request_id: c.get("requestId"),
-          name: error instanceof Error ? error.name : "unknown",
         }),
       );
-    const accepted = { event_id: body.event_id, status: "accepted" as const };
+    const respond = (status: "accepted" | "duplicate") => {
+      recordTelemetry({
+        event: "notification_accepted",
+        request_id: c.get("requestId"),
+        outcome: status,
+      });
+      return c.json({ event_id: body.event_id, status }, 202);
+    };
 
     let devices: Awaited<ReturnType<typeof listActiveDevices>>;
     let keys: Awaited<ReturnType<typeof loadDeviceTokenKeys>>;
@@ -150,7 +163,7 @@ export function registerNotifications(
     try {
       devices = await listActiveDevices(db, credential.accountId);
       // 送り先がなければ、記録を書かずに受け付ける (D1 の書き込みを使わない)。
-      if (devices.length === 0) return c.json(accepted, 202);
+      if (devices.length === 0) return respond("accepted");
       keys = await loadDeviceTokenKeys(c.env);
       event = {
         accountId: credential.accountId,
@@ -158,8 +171,7 @@ export function registerNotifications(
       };
       // 済んだ重複と処理中のやり直しは、1 日の上限より先に答える (上限に届いた後も、やり直しの答えを変えない)。
       const state = await findEventState(db, event, now);
-      if (state === "done")
-        return c.json({ event_id: body.event_id, status: "duplicate" as const }, 202);
+      if (state === "done") return respond("duplicate");
       if (state === "in_progress") throw inProgress();
       // 新しいイベントのときだけ、1 日の数を 1 行で数える。止まった処理中の記録は、最初に受け付けたときに数えている。
       if (
@@ -182,12 +194,11 @@ export function registerNotifications(
       start = await beginEvent(db, event, now);
     } catch (error) {
       if (error instanceof ProblemError) throw error;
-      logFailure("relay_accept_failed", error);
+      logFailure("relay_accept_failed");
       throw unavailable();
     }
     // 読んだ後に、ほかの要求が先に受け付けた。
-    if (start.kind === "done")
-      return c.json({ event_id: body.event_id, status: "duplicate" as const }, 202);
+    if (start.kind === "done") return respond("duplicate");
     if (start.kind === "in_progress") throw inProgress();
     const lease = { ...event, leaseId: start.leaseId };
 
@@ -251,11 +262,11 @@ export function registerNotifications(
             topic: device.topic,
           });
       }
-    } catch (error) {
+    } catch {
       // 送る途中で失敗した (D1、鍵の設定など)。受け付けの記録を消し、送り手のやり直しを受け付ける。
       // 途中まで送っていたら、やり直しで同じ通知が 2 回届きうる (配信は少なくとも 1 回。ADR-0001 §5)。
       await releaseEvent(db, lease).catch(() => {});
-      logFailure("relay_delivery_failed", error);
+      logFailure("relay_delivery_failed");
       throw unavailable();
     }
 
@@ -263,9 +274,9 @@ export function registerNotifications(
     // 記録は処理中のまま残り、リースが切れた後のやり直しで、もう 1 回送りうる。
     try {
       // 済みにできなかった (false) のは、時間がかかってリースが切れ、ほかの要求が引き継いだとき。その要求も送るので、2 回届く。
-      if (!(await completeEvent(db, lease))) logFailure("relay_lease_lost", undefined);
-    } catch (error) {
-      logFailure("relay_complete_failed", error);
+      if (!(await completeEvent(db, lease))) logFailure("relay_lease_lost");
+    } catch {
+      logFailure("relay_complete_failed");
     }
     const incomplete = (
       ["unreadable", "failed", "not_configured", "retry_later", "skipped"] as const
@@ -275,6 +286,6 @@ export function registerNotifications(
     (incomplete ? console.error : console.log)(
       JSON.stringify({ event: "relay_delivered", request_id: c.get("requestId"), outcomes }),
     );
-    return c.json(accepted, 202);
+    return respond("accepted");
   });
 }

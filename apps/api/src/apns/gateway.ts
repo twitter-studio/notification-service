@@ -10,6 +10,7 @@ import { DEVICE_VERIFICATION_TTL_MS, type DeviceVerificationSender } from "../de
 import { EVENT_TYPES } from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
+import { recordTelemetry } from "../telemetry";
 import { ApnsClient, type ApnsResult } from "./client";
 
 const RETENTION_MS = 60 * 60 * 1000;
@@ -94,7 +95,14 @@ export class ApnsPushGateway {
         payload: notification.payload,
       };
       // 平文トークン、署名鍵、検証 code は Queue に置かない。再送時に D1 の最新の状態と照合する。
-      await this.queue.send(job, { delaySeconds: retryDelay(result.delaySeconds, 1) });
+      const delay = retryDelay(result.delaySeconds, 1);
+      await this.queue.send(job, { delaySeconds: delay });
+      recordTelemetry({
+        event: "delivery_retry",
+        stage: "queued",
+        attempt: 1,
+        delay_seconds: delay,
+      });
       return { kind: "queued" };
     };
     this.sendDeviceVerification = async (push) => {
@@ -128,17 +136,20 @@ export class ApnsPushGateway {
       let result: ApnsResult;
       try {
         if (message.attempts > MAX_QUEUE_ATTEMPTS) {
+          recordTelemetry({ event: "delivery_discarded", reason: "attempt_limit" });
           message.ack();
           continue;
         }
         const parsed = RetryJob.safeParse(message.body);
         if (!parsed.success) {
+          recordTelemetry({ event: "delivery_discarded", reason: "invalid_job" });
           console.error(JSON.stringify({ event: "apns_retry_invalid_job" }));
           message.ack();
           continue;
         }
         const job = parsed.data;
         if (job.expiresAt <= this.now() || job.expiresAt > this.now() + RETENTION_MS) {
+          recordTelemetry({ event: "delivery_discarded", reason: "expired" });
           message.ack();
           continue;
         }
@@ -154,6 +165,7 @@ export class ApnsPushGateway {
             : (await findActiveInstallation(db, authority.installationId))?.accountId ===
               job.accountId;
         if (!authorized) {
+          recordTelemetry({ event: "delivery_discarded", reason: "unauthorized" });
           message.ack();
           continue;
         }
@@ -167,6 +179,7 @@ export class ApnsPushGateway {
         );
         // 削除、取り消し、通知停止、トークン更新後の古い仕事は送らない。
         if (device === undefined) {
+          recordTelemetry({ event: "delivery_discarded", reason: "inactive_device" });
           message.ack();
           continue;
         }
@@ -201,7 +214,14 @@ export class ApnsPushGateway {
         result = { kind: "retry", delaySeconds: 900 };
       }
       if (result.kind === "retry" && message.attempts < MAX_QUEUE_ATTEMPTS) {
-        message.retry({ delaySeconds: retryDelay(result.delaySeconds, message.attempts + 1) });
+        const delay = retryDelay(result.delaySeconds, message.attempts + 1);
+        message.retry({ delaySeconds: delay });
+        recordTelemetry({
+          event: "delivery_retry",
+          stage: "requeued",
+          attempt: message.attempts + 1,
+          delay_seconds: delay,
+        });
       } else {
         if (result.kind !== "sent" && result.kind !== "invalid_token")
           console.error(JSON.stringify({ event: "apns_delivery_exhausted", outcome: result.kind }));

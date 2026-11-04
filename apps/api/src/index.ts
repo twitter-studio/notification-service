@@ -77,22 +77,21 @@ export default {
         ? CLEANUPS[new Date(controller.scheduledTime).getUTCMinutes()]
         : undefined;
     if (cleanup === undefined) {
-      // wrangler.jsonc と CLEANUPS がずれている。式は秘密ではないので、ログに出す。
-      console.error(JSON.stringify({ event: "unknown_cron", cron: controller.cron }));
+      // 構成の不一致だけを記録し、渡された式の値は残さない。
+      console.error(JSON.stringify({ event: "unknown_cron" }));
       throw new Error("unknown_cron");
     }
     ctx.waitUntil(
       cleanup.run(env, controller.scheduledTime).then(
         (result) =>
           console.log(JSON.stringify({ event: "cleanup", cleanup: cleanup.name, result })),
-        (error: unknown) => {
+        () => {
           // エラーの文はログに出さない (app.ts の onError と同じ)。元のエラーを投げ直すと、ランタイムが文ごと記録するので、
           // 決まった文のエラーを投げて、Cron の実行を失敗として残す。
           console.error(
             JSON.stringify({
               event: "cleanup_failed",
               cleanup: cleanup.name,
-              name: error instanceof Error ? error.name : "unknown",
             }),
           );
           throw new Error("cleanup_failed");

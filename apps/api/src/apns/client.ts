@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { PushTarget } from "../notifications/push";
 import { toBase64Url } from "../security/encoding";
+import { recordTelemetry } from "../telemetry";
 
 const SigningKey = z.strictObject({
   environment: z.enum(["sandbox", "production"]),
@@ -164,6 +165,11 @@ export class ApnsClient {
           signal,
         },
       );
+      recordTelemetry({
+        event: "apns_response",
+        status: response.status,
+        push_type: request.pushType,
+      });
       let errorBody: z.infer<typeof Reason> | undefined;
       if (response.status === 400 || response.status === 410) {
         errorBody = await readReason(response);

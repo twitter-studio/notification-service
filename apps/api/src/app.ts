@@ -15,6 +15,7 @@ import { registerEnrollment } from "./routes/enrollment";
 import { registerHealth } from "./routes/health";
 import { registerNotifications, SEND_BUDGET_MS } from "./routes/notifications";
 import { registerSettings } from "./routes/settings";
+import { recordTelemetry } from "./telemetry";
 
 export type AppEnv = { Bindings: Env; Variables: { requestId: string } };
 
@@ -51,6 +52,7 @@ const requestId = createMiddleware<AppEnv>(async (c, next) => {
   c.set("requestId", id);
   await next();
   c.header("X-Request-Id", id);
+  recordTelemetry({ event: "http_request", request_id: id, status: c.res.status });
 });
 
 export type AppOptions = {
@@ -114,7 +116,6 @@ export function createApp(options: AppOptions = {}) {
       JSON.stringify({
         event: "unhandled_error",
         request_id: c.get("requestId"),
-        name: error.name,
       }),
     );
     return problem(c, 500, "Internal Server Error");
