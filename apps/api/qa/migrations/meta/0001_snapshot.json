@@ -1,0 +1,912 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "9f77cc56-c5ca-449a-bd52-d078234556a8",
+  "prevId": "9aee5328-6401-4f03-b6b5-8a7909cac61b",
+  "tables": {
+    "qa_attempts": {
+      "name": "qa_attempts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "jwt_issued_at": {
+          "name": "jwt_issued_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "isolate_id": {
+          "name": "isolate_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "qa_campaign": {
+      "name": "qa_campaign",
+      "columns": {
+        "singleton": {
+          "name": "singleton",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "qa_cases": {
+      "name": "qa_cases",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "installation_id": {
+          "name": "installation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_id": {
+          "name": "credential_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "delivery_dedup": {
+      "name": "delivery_dedup",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_key": {
+          "name": "event_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'processing'"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "delivery_dedup_account_id_notification_accounts_id_fk": {
+          "name": "delivery_dedup_account_id_notification_accounts_id_fk",
+          "tableFrom": "delivery_dedup",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "delivery_dedup_account_id_event_key_pk": {
+          "columns": ["account_id", "event_key"],
+          "name": "delivery_dedup_account_id_event_key_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "delivery_dedup_state": {
+          "name": "delivery_dedup_state",
+          "value": "\"delivery_dedup\".\"state\" IN ('processing', 'done')"
+        }
+      }
+    },
+    "device_verifications": {
+      "name": "device_verifications",
+      "columns": {
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_fingerprint": {
+          "name": "token_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "apns_environment": {
+          "name": "apns_environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "topic": {
+          "name": "topic",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        }
+      },
+      "indexes": {
+        "idx_device_verifications_expires": {
+          "name": "idx_device_verifications_expires",
+          "columns": ["expires_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "device_verifications_device_id_devices_id_fk": {
+          "name": "device_verifications_device_id_devices_id_fk",
+          "tableFrom": "device_verifications",
+          "tableTo": "devices",
+          "columnsFrom": ["device_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "device_verifications_code_hash": {
+          "name": "device_verifications_code_hash",
+          "value": "length(\"device_verifications\".\"code_hash\") = 43 AND \"device_verifications\".\"code_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
+        }
+      }
+    },
+    "devices": {
+      "name": "devices",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "installation_id": {
+          "name": "installation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "apns_token_ciphertext": {
+          "name": "apns_token_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_fingerprint": {
+          "name": "token_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "apns_environment": {
+          "name": "apns_environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "topic": {
+          "name": "topic",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        }
+      },
+      "indexes": {
+        "devices_installation_id_unique": {
+          "name": "devices_installation_id_unique",
+          "columns": ["installation_id"],
+          "isUnique": true
+        },
+        "devices_verified_token": {
+          "name": "devices_verified_token",
+          "columns": ["token_fingerprint", "apns_environment", "topic"],
+          "isUnique": true,
+          "where": "\"devices\".\"verified_at\" IS NOT NULL"
+        },
+        "idx_devices_token": {
+          "name": "idx_devices_token",
+          "columns": ["token_fingerprint", "apns_environment", "topic"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "devices_installation_id_installations_id_fk": {
+          "name": "devices_installation_id_installations_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "installations",
+          "columnsFrom": ["installation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "devices_apns_environment": {
+          "name": "devices_apns_environment",
+          "value": "\"devices\".\"apns_environment\" IN ('sandbox', 'production')"
+        },
+        "devices_apns_token_ciphertext": {
+          "name": "devices_apns_token_ciphertext",
+          "value": "\"devices\".\"apns_token_ciphertext\" GLOB 'v[0-9]*.*'"
+        },
+        "devices_token_fingerprint": {
+          "name": "devices_token_fingerprint",
+          "value": "\"devices\".\"token_fingerprint\" GLOB 'f[0-9]*.*'"
+        },
+        "devices_state": {
+          "name": "devices_state",
+          "value": "\"devices\".\"state\" IN ('active', 'disabled_by_user', 'invalidated')"
+        }
+      }
+    },
+    "installation_attestations": {
+      "name": "installation_attestations",
+      "columns": {
+        "installation_id": {
+          "name": "installation_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "public_key": {
+          "name": "public_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "counter": {
+          "name": "counter",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "app_id": {
+          "name": "app_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "environment": {
+          "name": "environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "receipt_ciphertext": {
+          "name": "receipt_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "installation_attestations_key_id_unique": {
+          "name": "installation_attestations_key_id_unique",
+          "columns": ["key_id"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "installation_attestations_installation_id_installations_id_fk": {
+          "name": "installation_attestations_installation_id_installations_id_fk",
+          "tableFrom": "installation_attestations",
+          "tableTo": "installations",
+          "columnsFrom": ["installation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "attestations_counter": {
+          "name": "attestations_counter",
+          "value": "\"installation_attestations\".\"counter\" BETWEEN 0 AND 4294967295"
+        },
+        "attestations_environment": {
+          "name": "attestations_environment",
+          "value": "\"installation_attestations\".\"environment\" IN ('development', 'production')"
+        },
+        "attestations_receipt_ciphertext": {
+          "name": "attestations_receipt_ciphertext",
+          "value": "\"installation_attestations\".\"receipt_ciphertext\" GLOB 'ar1.*'"
+        },
+        "attestations_key_id": {
+          "name": "attestations_key_id",
+          "value": "length(\"installation_attestations\".\"key_id\") = 43 AND \"installation_attestations\".\"key_id\" NOT GLOB '*[^A-Za-z0-9_-]*'"
+        }
+      }
+    },
+    "installations": {
+      "name": "installations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "public_key": {
+          "name": "public_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attestation_state": {
+          "name": "attestation_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        }
+      },
+      "indexes": {
+        "installations_public_key_unique": {
+          "name": "installations_public_key_unique",
+          "columns": ["public_key"],
+          "isUnique": true
+        },
+        "idx_installations_account": {
+          "name": "idx_installations_account",
+          "columns": ["account_id"],
+          "isUnique": false
+        },
+        "installations_one_active_per_account": {
+          "name": "installations_one_active_per_account",
+          "columns": ["account_id"],
+          "isUnique": true,
+          "where": "\"installations\".\"revoked_at\" IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "installations_account_id_notification_accounts_id_fk": {
+          "name": "installations_account_id_notification_accounts_id_fk",
+          "tableFrom": "installations",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "installations_attestation_state": {
+          "name": "installations_attestation_state",
+          "value": "\"installations\".\"attestation_state\" IN ('pending', 'verified', 'not_supported')"
+        }
+      }
+    },
+    "notification_accounts": {
+      "name": "notification_accounts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "notification_accounts_state": {
+          "name": "notification_accounts_state",
+          "value": "\"notification_accounts\".\"state\" IN ('active', 'disabled', 'deleted')"
+        }
+      }
+    },
+    "relay_credentials": {
+      "name": "relay_credentials",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "secret_hash": {
+          "name": "secret_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "relay_credentials_secret_hash_unique": {
+          "name": "relay_credentials_secret_hash_unique",
+          "columns": ["secret_hash"],
+          "isUnique": true
+        },
+        "idx_relay_credentials_account": {
+          "name": "idx_relay_credentials_account",
+          "columns": ["account_id", "created_at"],
+          "isUnique": false
+        },
+        "idx_relay_credentials_revoked": {
+          "name": "idx_relay_credentials_revoked",
+          "columns": ["revoked_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "relay_credentials_account_id_notification_accounts_id_fk": {
+          "name": "relay_credentials_account_id_notification_accounts_id_fk",
+          "tableFrom": "relay_credentials",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "relay_credentials_secret_hash": {
+          "name": "relay_credentials_secret_hash",
+          "value": "length(\"relay_credentials\".\"secret_hash\") = 43 AND \"relay_credentials\".\"secret_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
+        }
+      }
+    },
+    "relay_usage": {
+      "name": "relay_usage",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "window_start": {
+          "name": "window_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "relay_usage_account_id_notification_accounts_id_fk": {
+          "name": "relay_usage_account_id_notification_accounts_id_fk",
+          "tableFrom": "relay_usage",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sessions": {
+      "name": "sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "installation_id": {
+          "name": "installation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(CAST(strftime('%s', 'now') AS INTEGER) * 1000)"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sessions_token_hash_unique": {
+          "name": "sessions_token_hash_unique",
+          "columns": ["token_hash"],
+          "isUnique": true
+        },
+        "idx_sessions_account": {
+          "name": "idx_sessions_account",
+          "columns": ["account_id"],
+          "isUnique": false
+        },
+        "idx_sessions_installation": {
+          "name": "idx_sessions_installation",
+          "columns": ["installation_id", "created_at"],
+          "isUnique": false
+        },
+        "idx_sessions_expires": {
+          "name": "idx_sessions_expires",
+          "columns": ["expires_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "sessions_account_id_notification_accounts_id_fk": {
+          "name": "sessions_account_id_notification_accounts_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "notification_accounts",
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sessions_installation_id_installations_id_fk": {
+          "name": "sessions_installation_id_installations_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "installations",
+          "columnsFrom": ["installation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sessions_token_hash": {
+          "name": "sessions_token_hash",
+          "value": "length(\"sessions\".\"token_hash\") = 43 AND \"sessions\".\"token_hash\" NOT GLOB '*[^A-Za-z0-9_-]*'"
+        }
+      }
+    },
+    "used_challenges": {
+      "name": "used_challenges",
+      "columns": {
+        "nonce": {
+          "name": "nonce",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_used_challenges_expires": {
+          "name": "idx_used_challenges_expires",
+          "columns": ["expires_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

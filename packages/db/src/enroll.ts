@@ -3,6 +3,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { Db } from "./db";
 import { isUniqueViolation } from "./errors";
 import {
+  installationAttestations,
   installations,
   notificationAccounts,
   relayCredentials,
@@ -25,12 +26,14 @@ export type Enrollment =
  * 公開鍵を持っていることは、呼ぶ側 (AUTH-001) が署名で確かめてから呼ぶ。
  */
 export type ConsumedChallenge = { nonce: string; expiresAt: Date };
+export type NewAttestation = Omit<typeof installationAttestations.$inferInsert, "installationId">;
 export type NewSession = { tokenHash: BearerTokenHash; expiresAt: Date };
 
 export async function enrollInstallation(
   db: Db,
   input: {
     publicKey: string;
+    attestation?: NewAttestation;
     relaySecretHash: BearerTokenHash;
     /** 署名に使ったチャレンジ。バッチの先頭で使ったものとして記録し、同じチャレンジの 2 回目は UNIQUE で失敗する。 */
     challenge: ConsumedChallenge;
@@ -69,7 +72,11 @@ export async function enrollInstallation(
         publicKey: input.publicKey,
         createdAt: now,
         lastUsedAt: now,
+        attestationState: input.attestation === undefined ? "pending" : "verified",
       }),
+      ...(input.attestation === undefined
+        ? []
+        : [db.insert(installationAttestations).values({ ...input.attestation, installationId })]),
       db.insert(relayCredentials).values({
         id: relayCredentialId,
         accountId,

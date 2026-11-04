@@ -171,14 +171,44 @@
           "invite_code": {
             "type": "string",
             "maxLength": 256
+          },
+          "app_attest": {
+            "$ref": "#/components/schemas/AppAttestProof"
           }
         },
         "required": [
           "challenge",
           "public_key",
-          "signature",
-          "invite_code"
+          "signature"
         ]
+      },
+      "AppAttestProof": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "attestation",
+              "assertion"
+            ]
+          },
+          "key_id": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "data": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 87382
+          }
+        },
+        "required": [
+          "kind",
+          "key_id",
+          "data"
+        ],
+        "additionalProperties": false
       },
       "SessionResult": {
         "type": "object",
@@ -198,6 +228,9 @@
             "type": "string",
             "format": "uuid",
             "description": "インストールの ID。サーバーが返した文字列 (小文字の UUID) をそのまま送る"
+          },
+          "app_attest": {
+            "$ref": "#/components/schemas/AppAttestProof"
           },
           "challenge": {
             "type": "string",
@@ -700,6 +733,16 @@
               }
             }
           },
+          "428": {
+            "description": "このインストールには初回のApp Attestが必要",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "429": {
             "description": "回数の制限を超えた",
             "headers": {
@@ -810,6 +853,16 @@
           },
           "422": {
             "description": "入力の誤り",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "このインストールには初回のApp Attestが必要",
             "content": {
               "application/problem+json": {
                 "schema": {

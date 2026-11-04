@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { newAccount, testDb, testHash, unique } from "./helpers";
 
 describe("D1 のスキーマ", () => {
-  it("migration を当てると、設計書の 5 つの表と、登録の 2 つの表 (セッション、使ったチャレンジ)、端末の確かめの表、中継の 1 日の数の表がある", async () => {
+  it("migrationを当てると、通知と認証に必要な表がある", async () => {
     const { results } = await env.DB.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY name",
     ).all<{ name: string }>();
@@ -12,6 +12,7 @@ describe("D1 のスキーマ", () => {
       "delivery_dedup",
       "device_verifications",
       "devices",
+      "installation_attestations",
       "installations",
       "notification_accounts",
       "relay_credentials",

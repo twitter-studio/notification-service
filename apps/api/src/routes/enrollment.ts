@@ -4,11 +4,18 @@ import {
   createSession,
   enrollInstallation,
   findActiveInstallation,
+  findInstallationByPublicKey,
   isUniqueViolation,
 } from "@notification-service/db";
 import type { Context } from "hono";
 import type { AppEnv } from "../app";
 import { ProblemError } from "../problem";
+import {
+  AppAttestProof,
+  type AppAttestVerifier,
+  appAttestPolicy,
+  registrationProof,
+} from "../security/app-attest/registration";
 import { constantTimeEquals, hashBearerToken, newBearerToken } from "../security/bearer";
 import {
   challengeKeyFromEnv,
@@ -87,7 +94,8 @@ const enrollRoute = createRoute({
               challenge: z.string().max(512),
               public_key: z.string().max(128),
               signature: z.string().max(128),
-              invite_code: z.string().max(256),
+              invite_code: z.string().max(256).optional(),
+              app_attest: AppAttestProof.optional(),
             })
             .openapi("EnrollmentRequest"),
         },
@@ -127,6 +135,7 @@ const enrollRoute = createRoute({
     403: problemResponse(
       "登録を受け付けていない、招待のコードが違う、または取り消したインストールか止めたアカウントの鍵",
     ),
+    428: problemResponse("このインストールには初回のApp Attestが必要"),
     409: problemResponse("チャレンジはもう使われた"),
     ...commonProblems,
   },
@@ -145,6 +154,7 @@ const sessionRoute = createRoute({
           schema: z
             .object({
               installation_id: idSchema("インストールの ID"),
+              app_attest: AppAttestProof.optional(),
               challenge: z.string().max(512),
               signature: z.string().max(128),
             })
@@ -163,6 +173,7 @@ const sessionRoute = createRoute({
       },
     },
     401: problemResponse("チャレンジ、インストール、署名のどれかが正しくない"),
+    428: problemResponse("このインストールには初回のApp Attestが必要"),
     409: problemResponse("チャレンジはもう使われた"),
     ...commonProblems,
   },
@@ -206,7 +217,7 @@ async function checkInvite(
   if (!open || !matches) throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
 }
 
-export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
+export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttestVerifier) {
   /** 設定の誤りのログを、もう出したか。アプリごとに持つ (本番では isolate ごとに 1 つのアプリ)。 */
   const warnings = { shortInviteCode: false };
 
@@ -220,7 +231,8 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
   app.openapi(enrollRoute, async (c) => {
     await enforceRateLimit(c.env.CLIENT_RATE_LIMITER, clientAddressKey(c.req.raw));
     const body = c.req.valid("json");
-    await checkInvite(c, body.invite_code, warnings);
+    if (appAttestPolicy(c.env).mode === "invite_only")
+      await checkInvite(c, body.invite_code ?? "", warnings);
 
     const now = new Date();
     let challenge: { nonce: string; expiresAt: Date };
@@ -251,19 +263,32 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
     }
 
     const db = createDb(c.env.DB);
+    const existing = await findInstallationByPublicKey(db, body.public_key);
+    const attestation = await registrationProof({
+      proof: body.app_attest,
+      existing: existing?.attestation,
+      clientData: enrollmentMessage(body.challenge, body.public_key),
+      env: c.env,
+      now,
+      verifier,
+    });
     const relaySecret = newBearerToken("relay");
     const session = await newSession(now);
     try {
-      const enrolled = await enrollInstallation(
-        db,
-        {
-          publicKey: body.public_key,
-          relaySecretHash: await hashBearerToken(relaySecret),
-          challenge,
-          session: session.record,
-        },
-        now,
-      );
+      const enrolled =
+        existing?.accountId !== undefined
+          ? { created: false as const, accountId: existing.accountId, installationId: existing.id }
+          : await enrollInstallation(
+              db,
+              {
+                publicKey: body.public_key,
+                ...(attestation.kind === "initial" ? { attestation: attestation.value } : {}),
+                relaySecretHash: await hashBearerToken(relaySecret),
+                challenge,
+                session: session.record,
+              },
+              now,
+            );
       const sessionBody = { token: session.token, expires_at: session.expiresAt.toISOString() };
       if (enrolled.created) {
         return c.json(
@@ -288,6 +313,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
         {
           accountId: enrolled.accountId,
           installationId: enrolled.installationId,
+          attestation,
           challenge,
           session: session.record,
         },
@@ -304,6 +330,8 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
         200,
       );
     } catch (error) {
+      if (isUniqueViolation(error, "installation_attestations.key_id"))
+        throw new ProblemError(401, "Unauthorized", "The credentials are invalid.");
       if (isUniqueViolation(error, "used_challenges.nonce"))
         throw new ProblemError(409, "Conflict", "The challenge has already been used.");
       if (isUniqueViolation(error, "installations.public_key")) {
@@ -348,6 +376,14 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
     // 鍵を持つ端末が、セッションを作り直し続けるのを止める (署名を確かめた後に数え、ほかの人に枠を使わせない)。
     await enforceRateLimit(c.env.INSTALLATION_RATE_LIMITER, `installation:${body.installation_id}`);
 
+    const attestation = await registrationProof({
+      proof: body.app_attest,
+      existing: installation.attestation,
+      clientData: sessionMessage(body.challenge, body.installation_id),
+      env: c.env,
+      now,
+      verifier,
+    });
     const session = await newSession(now);
     try {
       const sessionId = await createSession(
@@ -355,6 +391,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
         {
           accountId: installation.accountId,
           installationId: body.installation_id,
+          attestation,
           challenge,
           session: session.record,
         },
@@ -363,6 +400,8 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>) {
       if (sessionId === undefined)
         throw new ProblemError(401, "Unauthorized", "The credentials are invalid.");
     } catch (error) {
+      if (isUniqueViolation(error, "installation_attestations.key_id"))
+        throw new ProblemError(401, "Unauthorized", "The credentials are invalid.");
       if (isUniqueViolation(error, "used_challenges.nonce"))
         throw new ProblemError(409, "Conflict", "The challenge has already been used.");
       throw error;

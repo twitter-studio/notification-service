@@ -5,6 +5,7 @@ import {
   deliveryDedup,
   devices,
   deviceVerifications,
+  installationAttestations,
   installations,
   notificationAccounts,
   relayCredentials,
@@ -110,6 +111,11 @@ export async function deleteAccount(
     db.delete(devices).where(inArray(devices.installationId, installationsOf(db, input.accountId))),
     db.delete(relayCredentials).where(eq(relayCredentials.accountId, input.accountId)),
     db.delete(sessions).where(eq(sessions.accountId, input.accountId)),
+    db
+      .delete(installationAttestations)
+      .where(
+        inArray(installationAttestations.installationId, installationsOf(db, input.accountId)),
+      ),
     db.delete(installations).where(eq(installations.accountId, input.accountId)),
     db
       .update(notificationAccounts)
@@ -122,7 +128,7 @@ export async function deleteAccount(
       )
       .returning({ id: notificationAccounts.id }),
   ]);
-  return results[7].length > 0;
+  return results[8].length > 0;
 }
 
 /** 使われなくなったとみなすまでの期間。アプリの起動の間隔より十分に長くする (notification-service#20、ADR-0010)。 */
@@ -196,6 +202,7 @@ export async function deleteAbandonedAccount(
     `DELETE FROM devices WHERE installation_id IN (${installationsOfAccount}) AND ${marked}`,
     `DELETE FROM relay_credentials WHERE account_id = ?1 AND ${marked}`,
     `DELETE FROM sessions WHERE account_id = ?1 AND ${marked}`,
+    `DELETE FROM installation_attestations WHERE installation_id IN (${installationsOfAccount}) AND ${marked}`,
     `DELETE FROM installations WHERE account_id = ?1 AND ${marked}`,
   ];
   const [mark] = await db.$client.batch<{ id: string }>([
@@ -242,6 +249,7 @@ export async function deleteAccountFromInstallation(
       `DELETE FROM devices WHERE installation_id IN (${installationIds})`,
       "DELETE FROM relay_credentials WHERE account_id = ?1",
       "DELETE FROM sessions WHERE account_id = ?1",
+      `DELETE FROM installation_attestations WHERE installation_id IN (${installationIds})`,
       "DELETE FROM installations WHERE account_id = ?1",
     ].map((sql) => db.$client.prepare(`${sql} AND ${deletedAccount}`).bind(input.accountId)),
   ]);
