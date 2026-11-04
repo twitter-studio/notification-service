@@ -5,6 +5,14 @@ import { openApiDocument } from "../src/openapi";
 import { jsonHeaders } from "./helpers/http";
 
 describe("OpenAPI の文書", () => {
+  it("所有確認の成功は必ず端末を返し、設定の端末だけが null を許す", () => {
+    const schemas = openApiDocument(createApp()).components?.schemas;
+    expect(schemas?.Device).toMatchObject({ type: "object" });
+    expect(schemas?.NotificationSettings).toMatchObject({
+      properties: { device: { type: ["object", "null"] } },
+    });
+  });
+
   it("リポジトリに置いた openapi.json と同じ (API を変えたら、pnpm --filter @notification-service/api openapi で作り直す)", async () => {
     const document = openApiDocument(createApp());
 
@@ -21,6 +29,9 @@ describe("OpenAPI の文書", () => {
     expect(security("/v1/devices/{id}", "put")).toEqual([{ session: [] }]);
     expect(security("/v1/devices/{id}/verification", "post")).toEqual([{ session: [] }]);
     expect(security("/v1/devices/{id}", "delete")).toEqual([{ session: [] }]);
+    expect(security("/v1/settings", "get")).toEqual([{ session: [] }]);
+    expect(security("/v1/account", "delete")).toEqual([{ session: [] }]);
+    expect(security("/v1/notifications/test", "post")).toEqual([{ session: [] }]);
     expect(security("/v1/notifications", "post")).toEqual([{ relay: [] }]);
     expect(security("/v1/enrollments", "post")).toBeUndefined();
   });

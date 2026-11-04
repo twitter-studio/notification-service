@@ -84,3 +84,8 @@ export async function verifyInstallationSignature(
     return false;
   }
 }
+
+/** アカウント削除専用の署名。ほかの操作の署名を削除に使い回させない。 */
+export function deleteAccountMessage(challenge: string, installationId: string): string {
+  return ["twitter-studio/delete-account/v1", challenge, installationId].join("\n");
+}

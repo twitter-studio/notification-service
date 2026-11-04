@@ -45,7 +45,7 @@ import {
 
 const ParamsSchema = z.object({ id: idSchema("インストールの ID") });
 
-const deviceFields = {
+export const deviceFields = {
   device_id: z.string(),
   state: z.enum(["active", "disabled_by_user", "invalidated"]),
   /** トークンを持っていることを確かめたか。確かめるまで通知を送らない。 */

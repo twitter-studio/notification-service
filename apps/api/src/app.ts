@@ -14,6 +14,7 @@ import { registerDevices } from "./routes/devices";
 import { registerEnrollment } from "./routes/enrollment";
 import { registerHealth } from "./routes/health";
 import { registerNotifications, SEND_BUDGET_MS } from "./routes/notifications";
+import { registerSettings } from "./routes/settings";
 
 export type AppEnv = { Bindings: Env; Variables: { requestId: string } };
 
@@ -93,6 +94,7 @@ export function createApp(options: AppOptions = {}) {
   registerHealth(app);
   registerEnrollment(app);
   registerRelayCredentials(app);
+  registerSettings(app, options.push ?? notConfiguredPushGateway);
   registerDevices(app, options.sendDeviceVerification ?? notConfiguredVerificationSender);
   registerNotifications(
     app,

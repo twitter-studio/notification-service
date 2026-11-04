@@ -11,6 +11,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { ApnsPushGateway, retryDelay } from "../src/apns/gateway";
 import { notificationPayload } from "../src/notifications/payload";
+import type { PushTarget } from "../src/notifications/push";
 import { loadDeviceTokenKeys, sealDeviceToken } from "../src/security/device-token";
 import { consumedChallenge, newAccount, TOPIC, verifyDevice } from "./db/helpers";
 import { signingConfiguration } from "./helpers/apns";
@@ -41,14 +42,14 @@ async function accountWithDevice() {
     owner,
     target: {
       accountId: owner.accountId,
-      relayCredentialId: owner.relayCredentialId,
+      authority: { kind: "relay", credentialId: owner.relayCredentialId },
       registrationCiphertext: sealed.ciphertext,
       deviceId: registered.deviceId,
       tokenFingerprint: sealed.fingerprint,
       apnsToken: token,
       apnsEnvironment: "sandbox" as const,
       topic: TOPIC,
-    },
+    } satisfies PushTarget,
   };
 }
 
@@ -119,6 +120,40 @@ async function consume(gateway: ApnsPushGateway, body: unknown, attempts = 1) {
 }
 
 describe("APNs の遅延再送", () => {
+  it("テスト通知の再送は中継資格情報の取り消しに依存せず、インストールの取り消しには従う", async () => {
+    const account = await accountWithDevice();
+    const test = await setup();
+    const target: PushTarget = {
+      ...account.target,
+      authority: { kind: "installation", installationId: account.owner.installationId },
+    };
+    await test.gateway.push(target, notification(), { signal: new AbortController().signal });
+    await revokeRelayCredential(createDb(env.DB), {
+      accountId: account.owner.accountId,
+      credentialId: account.owner.relayCredentialId,
+    });
+    test.setStatus(200);
+    await consume(test.gateway, test.jobs[0]);
+    expect(test.send).toHaveBeenCalledTimes(2);
+    await revokeInstallation(createDb(env.DB), account.owner);
+    await consume(test.gateway, test.jobs[0]);
+    expect(test.send).toHaveBeenCalledTimes(2);
+  });
+  it("別のアカウントのインストールを根拠とする再送を拒む", async () => {
+    const account = await accountWithDevice();
+    const other = await accountWithDevice();
+    const test = await setup();
+    const target: PushTarget = {
+      ...account.target,
+      authority: { kind: "installation", installationId: other.owner.installationId },
+    };
+    await test.gateway.push(target, notification(), { signal: new AbortController().signal });
+    test.setStatus(200);
+    const { id, result } = await consume(test.gateway, test.jobs[0]);
+    expect(result.explicitAcks).toEqual([id]);
+    expect(test.send).toHaveBeenCalledTimes(1);
+  });
+
   it("一時障害だけ Queue に渡し、平文トークンや署名鍵を残さず、同じ ID で再送する", async () => {
     const account = await accountWithDevice();
     const test = await setup();
