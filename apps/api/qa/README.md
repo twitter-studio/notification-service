@@ -35,4 +35,4 @@ Queue の at-least-once 配信で重複が起こった場合は試行の実測�
 
 既存プランを変えない。アカウント全体の使用量によって従量課金があり得るため、無料とは保証しない。作成前に [Workers](https://developers.cloudflare.com/workers/platform/pricing/)・[D1](https://developers.cloudflare.com/d1/platform/pricing/)・[Queues](https://developers.cloudflare.com/queues/platform/pricing/) の現行料金と既存リソース数を確認する。上記の回数・期限は試験側の制限であり、アカウント全体の請求額のハード上限ではない。
 
-この小規模試験で招待数拡大時の負荷を証明したとはしない。CPU・D1・Queue の実測を残し、拡大前の別ゲートで想定件数から費用を算出する。初期状態ではリモートリソースの作成・試験は未実施。
+この小規模試験で招待数拡大時の負荷を証明したとはしない。CPU・D1・Queue の実測を残し、拡大前の別ゲートで想定件数から費用を算出する。この設定の初期状態ではリモート試験を開始できない。2026-11-04に承認を得て実行した試験の結果と削除確認は [検証台帳](../../../docs/verification/2026-11-04-qa.md) に記録した。

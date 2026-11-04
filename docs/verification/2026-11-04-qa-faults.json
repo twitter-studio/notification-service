@@ -1,0 +1,166 @@
+{
+  "scope": "isolated-synthetic",
+  "source_commit": "89c4e17db23156b1ae3a71070af5f2d11b4b8400",
+  "http_request_limit": 100,
+  "http_requests_recorded": 73,
+  "edge_rejected_before_handler": 3,
+  "load": {
+    "requests": 20,
+    "concurrency": 5,
+    "success": 20,
+    "latency_min_ms": 180,
+    "latency_max_ms": 389,
+    "latency_p50_ms": 237
+  },
+  "cases": {
+    "sent": {
+      "statuses": [200],
+      "interval_ms": [],
+      "jwt_issued_after_first_seconds": [0]
+    },
+    "recover429": {
+      "statuses": [429, 200],
+      "interval_ms": [70087],
+      "jwt_issued_after_first_seconds": [0, 70]
+    },
+    "exhaust503": {
+      "statuses": [503, 503, 503],
+      "interval_ms": [941733, 1977730],
+      "jwt_issued_after_first_seconds": [0, 942, 2920]
+    },
+    "disabled": {
+      "statuses": [429],
+      "interval_ms": [],
+      "jwt_issued_after_first_seconds": [0]
+    },
+    "revoked": {
+      "statuses": [429],
+      "interval_ms": [],
+      "jwt_issued_after_first_seconds": [0]
+    },
+    "rotated": {
+      "statuses": [429],
+      "interval_ms": [],
+      "jwt_issued_after_first_seconds": [0]
+    },
+    "bad-token400": {
+      "statuses": [400],
+      "interval_ms": [],
+      "jwt_issued_after_first_seconds": [0]
+    },
+    "unregistered410": {
+      "statuses": [410],
+      "interval_ms": [],
+      "jwt_issued_after_first_seconds": [0]
+    }
+  },
+  "device_states": [
+    {
+      "name": "bad-token400",
+      "state": "invalidated"
+    },
+    {
+      "name": "disabled",
+      "state": "disabled_by_user"
+    },
+    {
+      "name": "exhaust503",
+      "state": "active"
+    },
+    {
+      "name": "recover429",
+      "state": "active"
+    },
+    {
+      "name": "revoked",
+      "state": "active"
+    },
+    {
+      "name": "rotated",
+      "state": "active"
+    },
+    {
+      "name": "sent",
+      "state": "active"
+    },
+    {
+      "name": "unregistered410",
+      "state": "invalidated"
+    }
+  ],
+  "isolate_count": 4,
+  "reported_metrics": {
+    "worker_before_cleanup": {
+      "from": "2026-11-04T08:47:53.428000Z",
+      "to": "2026-11-04T09:43:19.916320Z",
+      "values": {
+        "max": {
+          "cpuTime": 47778
+        },
+        "quantiles": {
+          "cpuTimeP50": 4030,
+          "cpuTimeP99": 47778
+        },
+        "sum": {
+          "cpuTimeUs": 433974,
+          "errors": 0,
+          "requests": 75,
+          "subrequests": 0
+        }
+      }
+    },
+    "database_queue_after_cleanup": {
+      "from": "2026-11-04T08:47:53.428000Z",
+      "to": "2026-11-04T09:45:30.906877Z",
+      "values": {
+        "d1AnalyticsAdaptiveGroups": {
+          "sum": {
+            "readQueries": 238,
+            "rowsRead": 2561,
+            "rowsWritten": 240,
+            "writeQueries": 86
+          }
+        },
+        "queueMessageOperationsAdaptiveGroups": {
+          "max": {
+            "messageSize": 559
+          },
+          "sum": {
+            "billableOperations": 16,
+            "bytes": 8944
+          }
+        }
+      }
+    }
+  },
+  "qa_database_size_bytes": 188416,
+  "cleanup": {
+    "worker_absent": true,
+    "queue_absent": true,
+    "database_absent": true,
+    "synthetic_secret_file_removed": true
+  },
+  "monitor_condition": {
+    "isolated_critical_query_value": 1,
+    "native_policy_changed_for_fault_test": false,
+    "extra_email_sent": false
+  },
+  "metadata_privacy": {
+    "apns_log_events_checked": 11,
+    "synthetic_secret_matches": 0,
+    "raw_logs_saved": false
+  },
+  "real_device_cold_start": {
+    "owner_confirmed_force_quit": true,
+    "owner_confirmed_notification_tap": true,
+    "notifications_tab_selected_observed": true,
+    "queue_empty": true,
+    "screenshot_removed": true
+  },
+  "simulator_permission_denied_registration_disabled": true,
+  "queue_operations_by_action": {
+    "WriteMessage": 5,
+    "ReadMessage": 6,
+    "DeleteMessage": 5
+  }
+}
