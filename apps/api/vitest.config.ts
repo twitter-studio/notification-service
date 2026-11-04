@@ -7,6 +7,9 @@ export default defineConfig(async () => {
   const migrations = await readD1Migrations(
     fileURLToPath(new URL("../../packages/db/migrations", import.meta.url)),
   );
+  const qaMigrations = await readD1Migrations(
+    fileURLToPath(new URL("./qa/migrations", import.meta.url)),
+  );
   return {
     plugins: [
       cloudflareTest({
@@ -22,6 +25,7 @@ export default defineConfig(async () => {
           },
           bindings: {
             TEST_MIGRATIONS: migrations,
+            QA_MIGRATIONS: qaMigrations,
             APNS_PROVIDER_KEYS: "",
             // テストだけの鍵 (本物の秘密ではない)。本物の鍵は Cloudflare の秘密に置く (ADR-0005)。
             DEVICE_TOKEN_KEYS: JSON.stringify({
@@ -37,7 +41,7 @@ export default defineConfig(async () => {
             }),
           },
           // migration をデータの入った D1 に当てるテストのための、テストだけの D1。
-          d1Databases: { MIGRATION_DB: "migration-test" },
+          d1Databases: { MIGRATION_DB: "migration-test", QA_DB: "qa-lab-test" },
         },
       }),
     ],

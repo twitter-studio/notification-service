@@ -3,5 +3,5 @@
   "compilerOptions": {
     "lib": ["ES2024", "WebWorker"]
   },
-  "include": ["src", "drizzle.config.ts"]
+  "include": ["src", "drizzle.config.ts", "drizzle.qa.config.ts"]
 }

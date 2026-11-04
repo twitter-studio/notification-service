@@ -6,7 +6,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json && drizzle-kit check",
+    "typecheck": "tsc -p tsconfig.json && drizzle-kit check && drizzle-kit check --config drizzle.qa.config.ts",
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
