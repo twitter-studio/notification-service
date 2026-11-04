@@ -22,7 +22,9 @@ export async function authenticator(
   requireValid(data.length >= 37 && data.length <= 4096);
   requireValid(equal(data.slice(0, 32), await sha256(new TextEncoder().encode(policy.appId))));
   const flags = data[32];
-  requireValid(flags === (kind === "attestation" ? 192 : 128));
+  // Appleの公開例は拡張を含んでもED bitが0なので、拡張はflagsに頼らず必ず検証する (ADR-0014)。
+  const allowedFlags = kind === "attestation" ? [0x40, 0xc0] : [0x00, 0x80];
+  requireValid(flags !== undefined && allowedFlags.includes(flags));
   const counter = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(33, false);
   if (kind === "assertion") {
     requireValid(counter > 0);

@@ -72,7 +72,9 @@ async function issue(
   await cert.sign(issuer?.keys.privateKey ?? pair.privateKey, "SHA-256", engine());
   return { cert, keys: pair };
 }
-export async function fixture(options: { clientData?: Uint8Array } = {}) {
+export async function fixture(
+  options: { clientData?: Uint8Array; attestationFlags?: number; assertionFlags?: number } = {},
+) {
   const now = new Date();
   const attRoot = await issue("Attest Root", await keys(), undefined, true);
   const intermediate = await issue("Attest Intermediate", await keys(), attRoot, true);
@@ -99,7 +101,7 @@ export async function fixture(options: { clientData?: Uint8Array } = {}) {
   const counter = new Uint8Array(4);
   const authData = concatenate(
     await sha256(new TextEncoder().encode(policy.appId)),
-    new Uint8Array([192]),
+    new Uint8Array([options.attestationFlags ?? 0x40]),
     counter,
     new TextEncoder().encode("appattestdevelop"),
     new Uint8Array([0, 32]),
@@ -189,7 +191,7 @@ export async function fixture(options: { clientData?: Uint8Array } = {}) {
     new DataView(count.buffer).setUint32(0, counterValue, false);
     const authenticatorData = concatenate(
       await sha256(new TextEncoder().encode(policy.appId)),
-      new Uint8Array([128]),
+      new Uint8Array([options.assertionFlags ?? 0x00]),
       count,
       ext,
     );

@@ -11,6 +11,7 @@ AUTH-003は、招待コードだけで受け付けていた登録にAppleの検�
 - 登録・セッション更新の`app_attest`は、`kind`（attestation / assertion）、32バイトの`key_id`、CBORの`data`を持つ。バイト列は既存の正規Base64URLで送る。clientDataはADR-0006の署名対象のUTF-8、Appleへ渡すclientDataHashはそのSHA-256。同じチャレンジ・用途・インストール鍵またはIDへ両方の証明を結び付ける。
 - CBORはcborg、ASN.1・X.509・CMSはPKI.js / ASN1.js、暗号処理はWorkersのWebCryptoを使う。公開から3日以上経過した版に固定する。AppleのApp Attestation RootとApple Root CA G3はコードに公開の定数として固定し、要求や環境変数からtrust anchorを受けない。検証中にAIA・OCSP等の外部URLを取得しない。
 - attestationの証明書の署名・有効期間・CA制約・固定rootまでの鎖、nonce拡張、P-256公開鍵、key ID、credential ID、COSE鍵を照合する。RP ID、初回counter=0、AAGUID、配布区分とbundle versionも検証する。開発はcategory 3、productionはTestFlightの2とApp Storeの4だけ。Enterprise / ad-hoc等は受けない。
+- Apple公式検証ガイドのattestationサンプルは、拡張を含んでもflagsが`0x40`でED bitが0だった（2026-11-04に公開CBORを解析して確認）。AT bitと未使用bitを検証し、ED bitの有無に関わらず拡張を必ず解析・検証する。attestationは`0x40/0xc0`、assertionは`0x00/0x80`を受け付け、未知のbitや用途不一致は拒む。
 - receiptは別にCMS署名とApple Root CA G3までの鎖を検証し、App ID・attested key・ATTEST・生成から5分以内（未来の許容は1分）を照合する。署名証明書はApple公開例のApp Attest receipt用OID `1.2.840.113635.100.12.15`を必要とする。これは署名用途を限定するサービスのポリシーであり、Apple公開例から推定した条件。実機で確認する。
 - 初回の検証結果は`installation_attestations`に保存し、`installations.attestation_state=verified`にする。key IDは全インストールで一意。receiptは`DEVICE_TOKEN_KEYS`の現行AES-GCM鍵で、独立した用途名・形式`ar1`・暗号鍵ID・App Attest key IDをAADとして暗号化する。平文・暗号文・鍵ID・証明書・key IDをログへ出さない。
 - 鍵のローテーションではAPNsトークンだけでなくreceiptの`ar1.<鍵ID>.`の行も数える。古いreceiptが残るあいだ古い暗号鍵を削除しない。receiptを別用途・別key IDへコピーして復号できない。アカウントの明示削除と180日未使用の削除でreceiptの行も消す。取り消し済みinstallationの行は従来の保持期間まで残す。

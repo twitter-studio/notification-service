@@ -111,3 +111,33 @@ it("任意の自己署名CAをAppleのtrust anchorとして受け入れない", 
   });
   await expect(verifier.attestation(test.input)).rejects.toThrow(InvalidAppAttest);
 });
+
+it.each([0x40, 0xc0])(
+  "Apple公開例のflagsを含むattestation flags=%iで署名済みの拡張を検証する",
+  async (flags) => {
+    const test = await fixture({ attestationFlags: flags });
+    expect((await test.verifier.attestation(test.input)).counter).toBe(0);
+    await expect(
+      test.verifier.attestation({
+        ...test.input,
+        policy: { ...test.input.policy, bundleVersions: ["wrong"] },
+      }),
+    ).rejects.toThrow(InvalidAppAttest);
+  },
+);
+it.each([0x00, 0x80])("assertion flags=%iでも拡張と署名を検証する", async (flags) => {
+  const test = await fixture({ assertionFlags: flags });
+  expect(
+    await test.verifier.assertion({
+      object: await test.assertion(1),
+      publicKey: test.point,
+      previousCounter: 0,
+      clientData: test.input.clientData,
+      policy: test.input.policy,
+    }),
+  ).toBe(1);
+});
+it.each([0x00, 0x41, 0xc1, 0xff])("attestationの用途に合わないflags=%iを拒む", async (flags) => {
+  const test = await fixture({ attestationFlags: flags });
+  await expect(test.verifier.attestation(test.input)).rejects.toThrow(InvalidAppAttest);
+});
