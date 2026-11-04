@@ -62,6 +62,32 @@ describe("秘密を含めない監視", () => {
     },
   );
 
+  it("Queueの待機判定は受け取ったカウンターを使わず、件数とbytesから決まる", () => {
+    const logs = vi.spyOn(console, "info").mockImplementation(() => {});
+    Reflect.apply(recordTelemetry, undefined, [
+      {
+        event: "queue_state",
+        backlog_count: 0,
+        backlog_bytes: 559,
+        oldest_age_seconds: 3300,
+        backlog_present: 0,
+        token: CANARY,
+      },
+    ]);
+    expect(logs.mock.calls).toEqual([
+      [
+        {
+          event: "queue_state",
+          backlog_count: 0,
+          backlog_bytes: 559,
+          oldest_age_seconds: 3300,
+          backlog_present: 1,
+        },
+      ],
+    ]);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain(CANARY);
+  });
+
   it("型を通らない呼び出しでも、未宣言の値や不正なログを記録しない", () => {
     const logs = vi.spyOn(console, "info").mockImplementation(() => {});
     Reflect.apply(recordTelemetry, undefined, [

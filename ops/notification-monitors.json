@@ -15,7 +15,7 @@
     "filters": {
       "source": ["sql_api"],
       "selectors": [
-        "SELECT COUNT(*) AS value FROM logs.workersLogs WHERE accountTag = '1657a0cfdeed30e3504b6f86cd9575e8' AND scriptName = 'notification-service' AND timestamp >= NOW() - INTERVAL '5' MINUTE AND ((attributes['event'] = 'apns_response' AND attributes['status'] = 403) OR attributes['event'] = 'apns_delivery_exhausted' OR attributes['event'] = 'queue_metrics_unavailable' OR (attributes['event'] = 'queue_state' AND attributes['backlog_count'] > 0 AND attributes['oldest_age_seconds'] >= 3300))"
+        "SELECT COUNT(*) AS value FROM logs.workersLogs WHERE accountTag = '1657a0cfdeed30e3504b6f86cd9575e8' AND scriptName = 'notification-service' AND timestamp >= NOW() - INTERVAL '5' MINUTE AND ((attributes['event'] = 'apns_response' AND attributes['status'] = 403) OR attributes['event'] = 'apns_delivery_exhausted' OR attributes['event'] = 'queue_metrics_unavailable' OR (attributes['event'] = 'queue_state' AND attributes['backlog_present'] = 1 AND attributes['oldest_age_seconds'] >= 3300))"
       ],
       "alert_trigger_preferences": ["threshold"],
       "alert_trigger_preferences_short_window": ["5m"],

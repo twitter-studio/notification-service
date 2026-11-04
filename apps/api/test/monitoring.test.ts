@@ -6,7 +6,7 @@ function snapshot() {
     window_seconds: 300,
     http: { total: 100, unauthorized: 0, forbidden: 0, throttled: 0, failed: 0 },
     apns: { total: 100, auth_failed: 0, throttled: 0, failed: 0, exhausted: 0 },
-    queue: { backlog: 0, oldest_age_seconds: 0 },
+    queue: { backlog: 0, backlog_bytes: 0, oldest_age_seconds: 0 },
   };
 }
 
@@ -38,7 +38,7 @@ describe("5分の通知監視の判定", () => {
     const value = snapshot();
     value.apns.throttled = 10;
     value.apns.failed = 5;
-    value.queue = { backlog: 1, oldest_age_seconds: 3300 };
+    value.queue = { backlog: 1, backlog_bytes: 100, oldest_age_seconds: 3300 };
     expect(evaluateMonitoring(value)).toEqual({
       status: "alert",
       alerts: ["apns_failure_rate", "apns_throttled_rate", "queue_stalled"],
@@ -47,6 +47,11 @@ describe("5分の通知監視の判定", () => {
     expect(evaluateMonitoring(value)).not.toMatchObject({
       alerts: expect.arrayContaining(["queue_stalled"]),
     });
+  });
+  it("件数0でもbytesが残り3300秒なら停滞を検出する", () => {
+    const value = snapshot();
+    value.queue = { backlog: 0, backlog_bytes: 559, oldest_age_seconds: 3300 };
+    expect(evaluateMonitoring(value)).toEqual({ status: "alert", alerts: ["queue_stalled"] });
   });
   it.each([
     {},

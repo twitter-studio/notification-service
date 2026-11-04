@@ -20,7 +20,7 @@ const Snapshot = z
     window_seconds: z.literal(300),
     http: HttpCounts,
     apns: ApnsCounts,
-    queue: z.strictObject({ backlog: count, oldest_age_seconds: count }),
+    queue: z.strictObject({ backlog: count, backlog_bytes: count, oldest_age_seconds: count }),
   })
   .superRefine((value, ctx) => {
     if (
@@ -49,6 +49,7 @@ export function evaluateMonitoring(input: unknown) {
     alerts.push("http_throttled_rate");
   if (apns.failed >= 5 && apns.failed / apns.total >= 0.05) alerts.push("apns_failure_rate");
   if (apns.throttled >= 5 && apns.throttled / apns.total >= 0.1) alerts.push("apns_throttled_rate");
-  if (queue.backlog > 0 && queue.oldest_age_seconds >= 3300) alerts.push("queue_stalled");
+  if ((queue.backlog > 0 || queue.backlog_bytes > 0) && queue.oldest_age_seconds >= 3300)
+    alerts.push("queue_stalled");
   return { status: alerts.length > 0 ? "alert" : "ok", alerts } as const;
 }
