@@ -125,7 +125,7 @@ it.each([0x40, 0xc0])(
     ).rejects.toThrow(InvalidAppAttest);
   },
 );
-it.each([0x00, 0x80])("assertion flags=%iでも拡張と署名を検証する", async (flags) => {
+it.each([0x00, 0x80, 0xc0])("assertion flags=%iでも拡張と署名を検証する", async (flags) => {
   const test = await fixture({ assertionFlags: flags });
   expect(
     await test.verifier.assertion({
@@ -136,8 +136,51 @@ it.each([0x00, 0x80])("assertion flags=%iでも拡張と署名を検証する", 
       policy: test.input.policy,
     }),
   ).toBe(1);
+  await expect(
+    test.verifier.assertion({
+      object: await test.assertion(1),
+      publicKey: test.point,
+      previousCounter: 0,
+      clientData: test.input.clientData,
+      policy: { ...test.input.policy, bundleVersions: ["wrong"] },
+    }),
+  ).rejects.toThrow(InvalidAppAttest);
+  await expect(
+    test.verifier.assertion({
+      object: await test.assertion(1),
+      publicKey: test.point,
+      previousCounter: 0,
+      clientData: new TextEncoder().encode("wrong"),
+      policy: test.input.policy,
+    }),
+  ).rejects.toThrow(InvalidAppAttest);
+});
+it.each([0x40, 0x81, 0xc1, 0xff])("assertionの未対応flags=%iを拒む", async (flags) => {
+  const test = await fixture({ assertionFlags: flags });
+  await expect(
+    test.verifier.assertion({
+      object: await test.assertion(1),
+      publicKey: test.point,
+      previousCounter: 0,
+      clientData: test.input.clientData,
+      policy: test.input.policy,
+    }),
+  ).rejects.toThrow(InvalidAppAttest);
 });
 it.each([0x00, 0x41, 0xc1, 0xff])("attestationの用途に合わないflags=%iを拒む", async (flags) => {
   const test = await fixture({ attestationFlags: flags });
   await expect(test.verifier.attestation(test.input)).rejects.toThrow(InvalidAppAttest);
+});
+
+it("nonceではなく合成データへ直接付けたassertion署名を拒む", async () => {
+  const test = await fixture({ assertionSignatureInput: "composite" });
+  await expect(
+    test.verifier.assertion({
+      object: await test.assertion(1),
+      publicKey: test.point,
+      previousCounter: 0,
+      clientData: test.input.clientData,
+      policy: test.input.policy,
+    }),
+  ).rejects.toThrow(InvalidAppAttest);
 });

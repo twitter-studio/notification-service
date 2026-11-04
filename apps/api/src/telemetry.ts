@@ -2,6 +2,10 @@ import { z } from "zod";
 
 const Telemetry = z.discriminatedUnion("event", [
   z.object({
+    event: z.literal("app_attest_assertion_rejected"),
+    stage: z.enum(["decode", "authenticator", "counter", "signature_format", "signature_check"]),
+  }),
+  z.object({
     event: z.literal("http_request"),
     request_id: z.uuid(),
     status: z.int().min(100).max(599),

@@ -7,6 +7,26 @@ const CANARY = "private-canary-do-not-log";
 afterEach(() => vi.restoreAllMocks());
 
 describe("秘密を含めない監視", () => {
+  it("App Attestの拒否は固定段階だけを残す", () => {
+    const logs = vi.spyOn(console, "info").mockImplementation(() => {});
+    const event = {
+      event: "app_attest_assertion_rejected" as const,
+      stage: "signature_check" as const,
+      signature: CANARY,
+      key_id: CANARY,
+      receipt: CANARY,
+    };
+    recordTelemetry(event);
+    expect(logs.mock.calls).toEqual([
+      [
+        {
+          event: "app_attest_assertion_rejected",
+          stage: "signature_check",
+        },
+      ],
+    ]);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain(CANARY);
+  });
   it.each([200, 401, 403, 429, 503])(
     "HTTP %s をサーバーの request ID で1回だけ数える",
     async (status) => {

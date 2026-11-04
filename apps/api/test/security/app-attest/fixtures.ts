@@ -73,7 +73,12 @@ async function issue(
   return { cert, keys: pair };
 }
 export async function fixture(
-  options: { clientData?: Uint8Array; attestationFlags?: number; assertionFlags?: number } = {},
+  options: {
+    clientData?: Uint8Array;
+    attestationFlags?: number;
+    assertionFlags?: number;
+    assertionSignatureInput?: "nonce" | "composite";
+  } = {},
 ) {
   const now = new Date();
   const attRoot = await issue("Attest Root", await keys(), undefined, true);
@@ -195,12 +200,11 @@ export async function fixture(
       count,
       ext,
     );
+    const composite = concatenate(authenticatorData, await sha256(assertionClientData));
+    const signed =
+      options.assertionSignatureInput === "composite" ? composite : await sha256(composite);
     const raw = new Uint8Array(
-      await crypto.subtle.sign(
-        { name: "ECDSA", hash: "SHA-256" },
-        pair.privateKey,
-        concatenate(authenticatorData, await sha256(assertionClientData)),
-      ),
+      await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, signed),
     );
     const integer = (data: Uint8Array) => {
       let i = 0;

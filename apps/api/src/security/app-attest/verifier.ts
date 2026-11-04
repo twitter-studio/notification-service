@@ -1,6 +1,7 @@
 import * as asn1 from "asn1js";
 import type { Certificate } from "pkijs";
 import { z } from "zod";
+import { recordTelemetry } from "../../telemetry";
 import { type AppAttestPolicy, authenticator } from "./authenticator";
 import { certificate, nonceExtension, publicPoint, verifyChain } from "./certificates";
 import {
@@ -78,14 +79,19 @@ export function createAppAttestVerifier(anchors: {
       clientData: Uint8Array;
       policy: AppAttestPolicy;
     }): Promise<number> {
+      let stage: "decode" | "authenticator" | "counter" | "signature_format" | "signature_check" =
+        "decode";
       try {
         requireValid(input.object.length <= 8192);
         const map = Attestation.parse(cbor(input.object));
         requireValid(map.size === 2);
         const authData = bytes.parse(map.get("authenticatorData"));
         const signature = bytes.parse(map.get("signature"));
+        stage = "authenticator";
         const parsed = await authenticator(authData, input.policy, "assertion");
+        stage = "counter";
         requireValid(parsed.counter > input.previousCounter);
+        stage = "signature_format";
         const der = parseAsn1(signature);
         requireValid(
           der instanceof asn1.Sequence &&
@@ -104,6 +110,7 @@ export function createAppAttestVerifier(anchors: {
           );
           raw.set(unsigned, index * 32 + 32 - unsigned.length);
         }
+        stage = "signature_check";
         const key = await crypto.subtle.importKey(
           "raw",
           buffer(input.publicKey),
@@ -111,13 +118,14 @@ export function createAppAttestVerifier(anchors: {
           false,
           ["verify"],
         );
-        // WebCryptoがSHA-256を適用するため、二重にhashしたnonceではなく合成したバイト列を渡す。
-        const signed = concatenate(authData, await sha256(input.clientData));
+        // Appleの手順は合成データのnonceをECDSA-SHA256で署名するため、WebCryptoにもnonceを渡す (ADR-0014)。
+        const nonce = await sha256(concatenate(authData, await sha256(input.clientData)));
         requireValid(
-          await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, raw, buffer(signed)),
+          await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, raw, buffer(nonce)),
         );
         return parsed.counter;
       } catch {
+        recordTelemetry({ event: "app_attest_assertion_rejected", stage });
         throw new InvalidAppAttest();
       }
     },
