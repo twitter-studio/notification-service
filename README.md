@@ -28,4 +28,4 @@ pnpm --filter @notification-service/api dev   # 手元で起動 (http://localhos
 
 本番やプレビューへのデプロイは、オーナーの承認を得てから行う。Cloudflare の資格情報や秘密は、このリポジトリに置かない。
 
-APNs の実装と遅延再送は [ADR-0011](docs/adr/0011-apns-delivery.md)、実機での接続確認は [APNS-001 の記録](docs/verification/2026-11-04-apns-sandbox.md) を参照。運営 API、D1 と再送 Queue はまだ配置していない。実リソースの作成と APNs の秘密鍵の保存はオーナーの承認後に行う。
+APNs の実装と遅延再送は [ADR-0011](docs/adr/0011-apns-delivery.md)、実機での接続確認は [APNS-001 の記録](docs/verification/2026-11-04-apns-sandbox.md) を参照。オーナーの承認で sandbox 検証用の運営 API・D1・再送 Queue を配置した。[初期配置の記録](docs/verification/2026-11-04-sandbox-deployment.md) に、対象、費用、確認結果と残る実機検証を記す。
