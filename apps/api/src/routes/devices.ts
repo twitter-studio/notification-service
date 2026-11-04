@@ -13,6 +13,7 @@ import {
 } from "@notification-service/db";
 import type { AppEnv } from "../app";
 import type { DeviceVerificationSender } from "../devices/verification";
+import { DEVICE_VERIFICATION_TTL_MS } from "../devices/verification";
 import { requireSession } from "../middleware/session";
 import { ProblemError } from "../problem";
 import { hashBearerToken, newBearerToken } from "../security/bearer";
@@ -41,7 +42,6 @@ import {
 // v1 の端末はインストールごとに 1 つなので、`{id}` はインストールの ID。セッションのインストールのものだけを扱う。
 
 /** 確かめの code の期限。 */
-export const DEVICE_VERIFICATION_TTL_MS = 10 * 60 * 1000;
 
 const ParamsSchema = z.object({ id: idSchema("インストールの ID") });
 
@@ -271,6 +271,8 @@ export function registerDevices(
       )) &&
       (await sendVerification({
         deviceId: registration.deviceId,
+        tokenFingerprint: sealed.fingerprint,
+        registrationCiphertext: sealed.ciphertext,
         apnsToken,
         apnsEnvironment: body.apns_environment,
         topic: body.topic,

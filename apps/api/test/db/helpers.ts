@@ -53,7 +53,7 @@ export function fingerprintOf(token: string): DeviceTokenFingerprint {
   return `f1.fingerprint-of-${token}` as DeviceTokenFingerprint;
 }
 
-function ciphertextOf(token: string): DeviceTokenCiphertext {
+export function ciphertextOf(token: string): DeviceTokenCiphertext {
   return `v1.test.ciphertext-of-${token}` as DeviceTokenCiphertext;
 }
 

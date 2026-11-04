@@ -27,3 +27,5 @@ pnpm --filter @notification-service/api dev   # 手元で起動 (http://localhos
 `wrangler.jsonc` か `apps/api/.dev.vars.example` を変えたら、`pnpm --filter @notification-service/api types` で型を作り直す。手元の秘密は `apps/api/.dev.vars` (コミットしない) に置く。
 
 本番やプレビューへのデプロイは、オーナーの承認を得てから行う。Cloudflare の資格情報や秘密は、このリポジトリに置かない。
+
+APNs の実装と遅延再送は [ADR-0011](docs/adr/0011-apns-delivery.md)、実機での接続確認は [APNS-001 の記録](docs/verification/2026-11-04-apns-sandbox.md) を参照。運営 API、D1 と再送 Queue はまだ配置していない。実リソースの作成と APNs の秘密鍵の保存はオーナーの承認後に行う。

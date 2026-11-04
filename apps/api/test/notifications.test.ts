@@ -24,12 +24,13 @@ async function keyOf(accountId: string, eventId: string): Promise<string> {
 }
 
 /** 通知を、送らずに記録する app。`outcome` で、送り手の結果を決める。 */
-function appWithPush(outcome: () => Promise<PushOutcome> = async () => "sent") {
+function appWithPush(outcome: () => Promise<PushOutcome["kind"]> = async () => "sent") {
   const sent: Sent[] = [];
   const app = createApp({
     push: async (target, notification, { signal }) => {
       sent.push({ target, notification, signal });
-      return outcome();
+      const kind = await outcome();
+      return kind === "invalid_token" ? { kind, invalidatedBefore: Date.now() } : { kind };
     },
   });
   return { app, sent };
@@ -448,7 +449,7 @@ describe("中継の受け付け", () => {
     const expired = createApp({
       push: async (target) => {
         sent.push(target);
-        return "sent";
+        return { kind: "sent" };
       },
       relaySendBudgetMs: 0,
     });

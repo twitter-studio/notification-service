@@ -65,3 +65,7 @@ Status: Accepted / 2026-11-04
   - code を、目に見える通知の文に入れない (人に code を読ませて返させる騙しを防ぐ)。送り手は、トークンと code をログに出さない。
 - アプリ (IOS-001) は、上の文に署名して登録し、確かめの push を受けて code を返す。起動のたびにトークンを送り直す。
 - 確かめるまで通知を送らないので、APNS-002 ができるまでは、本番でもどの端末にも送らない。
+
+## APNS-002 での具体化
+
+[ADR-0011](0011-apns-delivery.md) の background push に `verification.device_id` と `verification.code` を載せる。priority は5、期限は code と同じ10分。遅延再送は行わず、届かなければアプリが同じトークンを登録し直す。
