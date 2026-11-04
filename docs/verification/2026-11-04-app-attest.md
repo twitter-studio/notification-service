@@ -31,7 +31,8 @@
 - D1の集計は既存pendingのinstallationが1件、App Attestの行は0件。実機で確認済みになった証拠はまだない。
 - XcodeMCPKitの実機ビルドは`No Accounts`と、現行の自動署名プロファイルにApp Attest capability / entitlementがないエラーで失敗。代替Xcode MCPも`Transport closed`で利用できなかった。XcodeMCPKit自体が原因とは確定していない。
 - Apple DeveloperのTeam `PU5HXZ4FZ2`と対象Bundle IDの存在は画面で確認したが、App ID prefixの照合とcapabilityの保存は未完了。ブラウザ操作がタイムアウトしたため変更済みとは扱わない。
-- オーナーへ`/Applications/Xcode.app`のApple Accountsでの署名用サインイン確認を依頼した。Appleの認証情報や確認コードは取得しない。手動署名へは切り替えていない。
+- オーナーが再サインインした後、Xcode 27.3 betaのGUIで対象アカウント・Developer Team・Certificates, Identifiers & Profilesへのアクセスを確認した。しかし所有workspaceを閉じてproxy/helperを再起動してもheadlessはNo Accountsのまま。外部MCPアクセス設定はAlwaysで、公式mcpbridgeも初期化後に接続が閉じた。27.2はこのMacに残っておらず比較未実施。原因をXcodeMCPKit固有と断定せず、[Tweetbot #398](https://github.com/twitter-studio/tweetbot/issues/398)に記録した。
+- 一度だけ通常のXcodeでAutomatically manage signingを維持したiPhone 16向けBuildをオーナーへ依頼した。GUIで自動プロファイルを更新できるか確認後、headlessと実機検証へ戻る。Appleの認証情報や確認コードは取得せず、手動署名へは切り替えていない。
 
 ## 今回の範囲に含めないもの
 
