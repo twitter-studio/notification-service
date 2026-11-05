@@ -231,7 +231,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
   app.openapi(enrollRoute, async (c) => {
     await enforceRateLimit(c.env.CLIENT_RATE_LIMITER, clientAddressKey(c.req.raw));
     const body = c.req.valid("json");
-    if (appAttestPolicy(c.env).mode === "invite_only")
+    if (appAttestPolicy(c.env).mode !== "required")
       await checkInvite(c, body.invite_code ?? "", warnings);
 
     const now = new Date();

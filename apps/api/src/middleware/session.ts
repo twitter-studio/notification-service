@@ -18,7 +18,7 @@ export const requireSession = createMiddleware<SessionEnv>(async (c, next) => {
           createDb(c.env.DB),
           await hashBearerToken(token),
           new Date(),
-          policy.mode === "required" ? policy : undefined,
+          policy.mode !== "invite_only" ? policy : undefined,
         );
   if (session === undefined) {
     c.header("WWW-Authenticate", 'Bearer realm="notification-service"');

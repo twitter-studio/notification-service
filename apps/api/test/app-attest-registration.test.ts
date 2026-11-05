@@ -44,7 +44,7 @@ async function setup() {
     signature: await device.sign(enrollmentMessage(challenge, device.publicKey)),
     app_attest: proof,
   };
-  return { test, device, post, proof, enrollment, bindings };
+  return { app, test, device, post, proof, enrollment, bindings };
 }
 type Enrolled = { account_id: string; installation_id: string; session: { token: string } };
 
@@ -94,6 +94,28 @@ describe("App Attestを必要とする登録とセッション", () => {
       ).status,
     ).toBe(401);
   });
+  it("招待制で証明を必須にしたときは、両方がそろった登録だけを受ける", async () => {
+    const t = await setup();
+    const inviteCode = "test-invite-code-0123456789";
+    const bindings = {
+      ...t.bindings,
+      APP_ATTEST_POLICY: JSON.stringify({ ...policy, mode: "required_with_invite" }),
+    };
+    expect((await t.post("/v1/enrollments", t.enrollment, bindings)).status).toBe(403);
+    expect(
+      (
+        await t.post(
+          "/v1/enrollments",
+          { ...t.enrollment, app_attest: undefined, invite_code: inviteCode },
+          bindings,
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (await t.post("/v1/enrollments", { ...t.enrollment, invite_code: inviteCode }, bindings))
+        .status,
+    ).toBe(201);
+  });
   it("セッション更新にはassertionを必要とし、同じcounterの並行要求は1件だけ成功する", async () => {
     const t = await setup();
     const response = await t.post("/v1/enrollments", t.enrollment);
@@ -142,6 +164,25 @@ describe("App Attestを必要とする登録とセッション", () => {
     );
     expect(invited.status).toBe(201);
     const old = await invited.json<Enrolled>();
+    const sessionRequest = {
+      headers: { Authorization: `Bearer ${old.session.token}` },
+    };
+    expect(
+      (
+        await t.app.request("/v1/settings", sessionRequest, {
+          ...t.bindings,
+          APP_ATTEST_POLICY: JSON.stringify({ ...policy, mode: "invite_only" }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await t.app.request("/v1/settings", sessionRequest, {
+          ...t.bindings,
+          APP_ATTEST_POLICY: JSON.stringify({ ...policy, mode: "required_with_invite" }),
+        })
+      ).status,
+    ).toBe(401);
     expect(
       await findActiveSession(
         createDb(env.DB),
