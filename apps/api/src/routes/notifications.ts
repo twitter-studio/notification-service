@@ -21,6 +21,7 @@ import {
   notificationPayload,
 } from "../notifications/payload";
 import type { PushGateway, PushOutcome } from "../notifications/push";
+import { requireDeliveryEnabled } from "../operations";
 import { ProblemError } from "../problem";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
 import { enforceRateLimit } from "../security/rate-limit";
@@ -121,6 +122,7 @@ export function registerNotifications(
   sendBudgetMs: number,
 ) {
   app.openapi(route, async (c) => {
+    requireDeliveryEnabled(c.env);
     const credential = c.get("relayCredential");
     const body = c.req.valid("json");
     if (EVENT_TYPES_WITHOUT_POST.has(body.type) === (body.post_id !== undefined))

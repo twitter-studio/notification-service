@@ -7,14 +7,16 @@ import {
   cleanupExpiredAuthRecords,
   cleanupStaleDevices,
 } from "./maintenance";
+import { publicOperationEnabled, type RuntimeEnv } from "./operations";
 import { recordQueueMetrics } from "./queue-metrics";
+import { recordTelemetry } from "./telemetry";
 
 let currentClient: { configuration: string | undefined; client: ApnsClient } | undefined;
 const applications = new WeakMap<
-  Env,
+  RuntimeEnv,
   { app: ReturnType<typeof createApp>; gateway: ApnsPushGateway; configuration: string | undefined }
 >();
-function application(env: Env) {
+function application(env: RuntimeEnv) {
   const configuration = env.APNS_PROVIDER_KEYS;
   if (currentClient === undefined || currentClient.configuration !== configuration)
     currentClient = { configuration, client: new ApnsClient(configuration) };
@@ -61,8 +63,15 @@ export default {
       return new Response(null, { status: 503, headers: { "Cache-Control": "no-store" } });
     }
   },
-  async queue(batch, env) {
+  async queue(batch: MessageBatch<unknown>, env: RuntimeEnv) {
     try {
+      if (!publicOperationEnabled(env, "PUBLIC_DELIVERY_ENABLED")) {
+        for (const message of batch.messages) {
+          recordTelemetry({ event: "delivery_discarded", reason: "operations_paused" });
+          message.ack();
+        }
+        return;
+      }
       await application(env).gateway.consume(batch);
     } catch {
       console.error(JSON.stringify({ event: "apns_queue_configuration_invalid" }));

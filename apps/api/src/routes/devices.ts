@@ -15,6 +15,7 @@ import type { AppEnv } from "../app";
 import type { DeviceVerificationSender } from "../devices/verification";
 import { DEVICE_VERIFICATION_TTL_MS } from "../devices/verification";
 import { requireSession } from "../middleware/session";
+import { requireDeliveryEnabled } from "../operations";
 import { ProblemError } from "../problem";
 import { hashBearerToken, newBearerToken } from "../security/bearer";
 import { challengeKeyFromEnv, InvalidChallengeError, verifyChallenge } from "../security/challenge";
@@ -34,6 +35,7 @@ import {
   commonProblems,
   idSchema,
   problemResponse,
+  retryableProblemResponse,
   sessionProblems,
   signedSessionProblems,
 } from "./openapi";
@@ -102,6 +104,7 @@ const putRoute = createRoute({
     ...signedSessionProblems,
     404: problemResponse("セッションのインストールでない"),
     409: problemResponse("チャレンジはもう使われた"),
+    503: retryableProblemResponse("所有確認の送信を停止中"),
     ...commonProblems,
   },
 });
@@ -162,6 +165,7 @@ export function registerDevices(
   sendVerification: DeviceVerificationSender,
 ) {
   app.openapi(putRoute, async (c) => {
+    requireDeliveryEnabled(c.env);
     const session = c.get("session");
     const { id } = c.req.valid("param");
     // ほかのインストールの ID は、あるかを区別せずに 404 にする。
