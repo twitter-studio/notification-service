@@ -7,6 +7,8 @@ import { z } from "zod";
 import { checkDeploymentGate, DeploymentFailure } from "./deployment-gate.mjs";
 
 const KIND = "service";
+const verificationWorker = "notification-service-prod-verification";
+const verificationQueue = "notification-apns-prod-verification";
 const directory = resolve(import.meta.dirname, "..");
 const name = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
 const Inputs = z.object({
@@ -32,7 +34,7 @@ const Inputs = z.object({
         }),
       }),
 });
-export function deploymentConfig(env) {
+export function deploymentConfig(env, { productionVerification = false } = {}) {
   const input = Inputs.parse(env);
   const configPath = resolve(
     directory,
@@ -40,8 +42,11 @@ export function deploymentConfig(env) {
   );
   const parsed = experimental_readRawConfig({ config: configPath });
   if (parsed.configPath !== configPath || parsed.redirected) throw new DeploymentFailure();
-  const config = parsed.rawConfig;
-  if (KIND === "service" && input.WORKER_NAME !== "notification-service")
+  const config = structuredClone(parsed.rawConfig);
+  if (
+    KIND === "service" &&
+    input.WORKER_NAME !== (productionVerification ? verificationWorker : "notification-service")
+  )
     throw new DeploymentFailure();
   config.name = input.WORKER_NAME;
   config.account_id = input.CLOUDFLARE_ACCOUNT_ID;
@@ -58,10 +63,50 @@ export function deploymentConfig(env) {
       RELAY_URL: input.RELAY_URL,
     };
   } else {
+    if (productionVerification) {
+      const database = config.d1_databases[0];
+      if (input.D1_DATABASE_ID.toLowerCase() === database.database_id)
+        throw new DeploymentFailure();
+      database.database_name = verificationWorker;
+      config.queues.producers[0].queue = verificationQueue;
+      config.queues.consumers[0].queue = verificationQueue;
+      config.limits = { cpu_ms: 1000 };
+      for (const limit of config.ratelimits)
+        limit.namespace_id = String(Number(limit.namespace_id) + 100);
+      const bundleVersion = z
+        .string()
+        .regex(/^[1-9][0-9]{0,8}$/)
+        .parse(env.PROD_BUNDLE_VERSION);
+      const keyChecks = z
+        .strictObject({
+          fingerprint: z.string().regex(/^[a-f0-9]{16}$/),
+          keys: z.strictObject({ "prod-verification": z.string().regex(/^[a-f0-9]{16}$/) }),
+        })
+        .parse(JSON.parse(env.PROD_DEVICE_TOKEN_KEY_CHECKS));
+      const sandboxChecks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
+      const checks = [keyChecks.fingerprint, keyChecks.keys["prod-verification"]];
+      if (
+        new Set(checks).size !== checks.length ||
+        checks.some((value) =>
+          [sandboxChecks.fingerprint, ...Object.values(sandboxChecks.keys)].includes(value),
+        )
+      )
+        throw new DeploymentFailure();
+      config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(keyChecks);
+      config.vars.APP_ATTEST_POLICY = JSON.stringify({
+        mode: "required_with_invite",
+        environment: "production",
+        appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
+        bundleVersions: [bundleVersion],
+      });
+    }
     config.d1_databases[0].database_id = input.D1_DATABASE_ID;
     config.d1_databases[0].migrations_dir = resolve(directory, "../../packages/db/migrations");
     const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
-    if (policy.mode !== "invite_only" || policy.environment !== "development")
+    if (
+      !productionVerification &&
+      (policy.mode !== "invite_only" || policy.environment !== "development")
+    )
       throw new DeploymentFailure();
   }
   return {
@@ -160,14 +205,16 @@ export async function executeDeployment(
   {
     fetchImpl = fetch,
     runCommand = (command, args, options) => spawnSync(command, args, options),
+    productionVerification = false,
   } = {},
 ) {
   const request = await checkDeploymentGate(env, {
     fetchImpl,
     allowMigration: KIND === "service",
     requireApproval: true,
+    productionVerification,
   });
-  const { config, input, origin } = deploymentConfig(env);
+  const { config, input, origin } = deploymentConfig(env, { productionVerification });
   if (!env.CLOUDFLARE_API_TOKEN || /[\r\n]/.test(env.CLOUDFLARE_API_TOKEN))
     throw new DeploymentFailure();
   const source = runCommand("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" });
@@ -206,8 +253,34 @@ export async function executeDeployment(
   }
   const worker = `workers/scripts/${config.name}`;
   const queue = `queues/${input.CF_QUEUE_ID}`;
+  if (productionVerification || request.operation === "migrate") {
+    const db = await api(`d1/database/${input.D1_DATABASE_ID}`);
+    if (db.uuid !== input.D1_DATABASE_ID || db.name !== config.d1_databases[0].database_name)
+      throw new DeploymentFailure();
+  }
   if (request.operation === "deploy") {
-    checkSnapshot(await api(`${worker}/settings`), config, { before: true });
+    const settings = await api(`${worker}/settings`);
+    if (
+      productionVerification &&
+      settings.bindings?.some(
+        (binding) =>
+          binding.name === "PRODUCTION_VERIFICATION_BOOTSTRAP" &&
+          binding.type === "plain_text" &&
+          binding.text === "true",
+      )
+    ) {
+      if (
+        settings.bindings.length !== ExpectedSecrets.length + 1 ||
+        !ExpectedSecrets.every((name) =>
+          settings.bindings.some(
+            (binding) => binding.name === name && binding.type === "secret_text",
+          ),
+        )
+      )
+        throw new DeploymentFailure();
+    } else {
+      checkSnapshot(settings, config, { before: !productionVerification });
+    }
     const details = await api(queue);
     const metrics = await api(`${queue}/metrics`);
     if (
@@ -215,10 +288,6 @@ export async function executeDeployment(
       metrics.backlog_count !== 0 ||
       metrics.backlog_bytes !== 0
     )
-      throw new DeploymentFailure();
-  } else {
-    const db = await api(`d1/database/${input.D1_DATABASE_ID}`);
-    if (db.uuid !== input.D1_DATABASE_ID || db.name !== config.d1_databases[0].database_name)
       throw new DeploymentFailure();
   }
   const path = resolve(directory, `.sandbox-deploy-${randomUUID()}.jsonc`);
@@ -283,14 +352,24 @@ export async function executeDeployment(
       await result.body?.cancel();
       if (result.status !== status) throw new DeploymentFailure();
     }
-    return { status: "sandbox_deployed", sha: request.sha, version };
+    return {
+      status: productionVerification ? "production_verification_deployed" : "sandbox_deployed",
+      sha: request.sha,
+      version,
+    };
   } finally {
     unlinkSync(path);
   }
 }
 if (import.meta.main) {
   try {
-    console.log(JSON.stringify(await executeDeployment(process.env)));
+    console.log(
+      JSON.stringify(
+        await executeDeployment(process.env, {
+          productionVerification: process.argv[2] === "production-verification",
+        }),
+      ),
+    );
   } catch {
     console.error("sandbox_operation_failed_manual_verification_required");
     process.exitCode = 1;
