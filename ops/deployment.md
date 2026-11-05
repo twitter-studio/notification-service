@@ -58,3 +58,15 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 5. Worker名、D1・Queueのbinding、App Attestのproduction設定、稼働版100%、Queue空、Cron、healthを照合する。最初の実機登録後は招待secretの削除を別途実施し、既存登録のセッション更新とsandboxの稼働状態を確認する。
 
 この手順は承認された初回の1ビルドに限る。配置済みWorkerとの設定照合は完全一致を要求する。別のbuild番号で試験をやり直す場合は、検証アカウントと旧配布物の扱いを確定し、設定差分と配置を改めてレビューする。
+
+## 公開用productionを閉じた状態で準備する
+
+対象は `notification-service-production` のWorkerとD1、`notification-apns-production` Queue。sandboxとproduction検証用の資源を再利用しない。このWorkflowは登録・配送を閉じたまま、最初のmigrationとWorkerの配置を別々に行う。一般登録を有効にする操作は別の変更としてレビューする。
+
+1. オーナーの承認後、専用D1とQueueを作り、外部の入口を持たず404だけを返す[初期Worker](../apps/api/public-bootstrap/wrangler.jsonc)を用意する。初期Workerの平文変数は `PUBLIC_PRODUCTION_BOOTSTRAP=true` のみ。APNs provider鍵、チャレンジ署名鍵、端末トークンの暗号鍵束と指紋鍵を、対象Workerのsecretに置く。公開用の端末トークン鍵とチャレンジ鍵は別途生成する。APNs鍵の選定と運用対象は承認記録に残す。
+2. GitHubの `production` と `production-migrations` を本人1名のrequired reviewer、main限定、管理者bypass禁止で設定する。配置とmigrationの資格情報を分ける。必要な権限は配置先Workerの編集、アカウントsubdomainの読み取り、D1参照、Queue管理と、migration先D1の編集。個別に絞れない権限は、発行前に許可範囲を記録する。
+3. 両Environmentの変数に `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_BUNDLE_VERSION`、`PROD_DEVICE_TOKEN_KEY_CHECKS` と `VERIFICATION_DEVICE_TOKEN_KEY_CHECKS` を指定する。公開用のKCVの鍵IDは `production`。検証用KCVは検証用Environmentの実値と照合する。KCVだけを変数に保存し、鍵をコピーしない。
+4. リポジトリの `PUBLIC_PRODUCTION_DEPLOY_ENABLED` は通常false。作業中だけtrueにし、`Closed public production deployment` をmainのCI成功SHAで起動する。専用D1に初期migrationを適用した後、別runでWorkerを配置する。各runはオーナー本人がEnvironment承認を行う。
+5. `public_production_closed_deployed`、health 200、登録403、専用のbindingとQueue空を確認する。公開用のApp Attestは `required` と `production`、招待secretは存在しない。両スイッチはfalse。完了後は配置有効化変数をfalseに戻し、migration用の資格情報を整理する。
+
+この配置は新規登録、APNs送信、X購読、App Store Connectへのアップロードを含まない。対応する配布候補と利用条件は [RELEASE-001](https://github.com/twitter-studio/notification-docs/issues/3) で確認する。

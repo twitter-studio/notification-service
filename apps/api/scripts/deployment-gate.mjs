@@ -3,12 +3,24 @@ export class DeploymentFailure extends Error {
     super("deployment_rejected");
   }
 }
-export function deploymentRequest(env, allowMigration = false, productionVerification = false) {
+export function deploymentRequest(
+  env,
+  allowMigration = false,
+  productionVerification = false,
+  publicProduction = false,
+) {
   const operation = env.DEPLOY_OPERATION;
-  const enabled = productionVerification
-    ? env.PRODUCTION_VERIFICATION_DEPLOY_ENABLED
-    : env.SANDBOX_DEPLOY_ENABLED;
-  const target = productionVerification ? "production-verification" : "sandbox";
+  if (productionVerification && publicProduction) throw new DeploymentFailure();
+  const enabled = publicProduction
+    ? env.PUBLIC_PRODUCTION_DEPLOY_ENABLED
+    : productionVerification
+      ? env.PRODUCTION_VERIFICATION_DEPLOY_ENABLED
+      : env.SANDBOX_DEPLOY_ENABLED;
+  const target = publicProduction
+    ? "production"
+    : productionVerification
+      ? "production-verification"
+      : "sandbox";
   if (
     env.GITHUB_ACTIONS !== "true" ||
     env.GITHUB_RUN_ATTEMPT !== "1" ||
@@ -40,9 +52,10 @@ export async function checkDeploymentGate(
     allowMigration = false,
     requireApproval = false,
     productionVerification = false,
+    publicProduction = false,
   } = {},
 ) {
-  const request = deploymentRequest(env, allowMigration, productionVerification);
+  const request = deploymentRequest(env, allowMigration, productionVerification, publicProduction);
   if (!env.GH_TOKEN || /[\r\n]/.test(env.GH_TOKEN)) throw new DeploymentFailure();
   async function get(path) {
     const response = await fetchImpl(`https://api.github.com/repos/${request.repository}/${path}`, {
@@ -66,6 +79,7 @@ export async function checkDeploymentGate(
   const reviewer = environment.protection_rules?.find((rule) => rule.type === "required_reviewers");
   if (
     environment.name !== request.environment ||
+    (publicProduction && environment.can_admins_bypass !== false) ||
     reviewer?.reviewers?.length !== 1 ||
     !reviewer?.reviewers?.some(
       (value) => value.type === "User" && value.reviewer?.login === env.DEPLOY_REVIEWER,
@@ -116,9 +130,11 @@ export async function checkDeploymentGate(
 if (import.meta.main) {
   try {
     const productionVerification = process.argv[2] === "production-verification";
+    const publicProduction = process.argv[2] === "public-production";
     await checkDeploymentGate(process.env, {
-      allowMigration: productionVerification || process.argv[2] === "service",
+      allowMigration: publicProduction || productionVerification || process.argv[2] === "service",
       productionVerification,
+      publicProduction,
     });
     console.log("deployment_gate_ok");
   } catch {

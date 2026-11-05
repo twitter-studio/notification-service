@@ -21,7 +21,6 @@ export const policy = {
   environment: "development",
   bundleVersions: ["1"],
 } as const;
-export const now = new Date("2026-11-04T10:00:00.000Z");
 const name = (value: string) =>
   new RelativeDistinguishedNames({
     typesAndValues: [
@@ -38,6 +37,7 @@ async function keys() {
 }
 let serial = 1;
 async function issue(
+  now: Date,
   subject: string,
   pair: CryptoKeyPair,
   issuer: { cert: Certificate; keys: CryptoKeyPair } | undefined,
@@ -83,10 +83,10 @@ export async function fixture(
 ) {
   const now = new Date();
   const environment = options.environment ?? policy.environment;
-  const attRoot = await issue("Attest Root", await keys(), undefined, true);
-  const intermediate = await issue("Attest Intermediate", await keys(), attRoot, true);
-  const receiptRoot = await issue("Receipt Root", await keys(), undefined, true);
-  const receiptSigner = await issue("Receipt Signer", await keys(), receiptRoot, false, [
+  const attRoot = await issue(now, "Attest Root", await keys(), undefined, true);
+  const intermediate = await issue(now, "Attest Intermediate", await keys(), attRoot, true);
+  const receiptRoot = await issue(now, "Receipt Root", await keys(), undefined, true);
+  const receiptSigner = await issue(now, "Receipt Signer", await keys(), receiptRoot, false, [
     new Extension({ extnID: "1.2.840.113635.100.12.15", extnValue: new asn1.Null().toBER() }),
   ]);
   const pair = await keys();
@@ -130,7 +130,7 @@ export async function fixture(
     ext,
   );
   const nonce = await sha256(concatenate(authData, await sha256(clientData)));
-  const leaf = await issue("Attested Key", pair, intermediate, false, [
+  const leaf = await issue(now, "Attested Key", pair, intermediate, false, [
     new Extension({
       extnID: "1.2.840.113635.100.8.2",
       extnValue: new asn1.Sequence({

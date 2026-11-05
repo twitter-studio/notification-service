@@ -1,0 +1,11 @@
+{
+  "name": "notification-service-production",
+  "main": "index.js",
+  "compatibility_date": "2026-10-29",
+  "workers_dev": false,
+  "preview_urls": false,
+  "send_metrics": false,
+  "vars": {
+    "PUBLIC_PRODUCTION_BOOTSTRAP": "true"
+  }
+}
