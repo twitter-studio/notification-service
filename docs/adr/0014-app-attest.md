@@ -28,6 +28,7 @@ AUTH-003は、招待コードだけで受け付けていた登録にAppleの検�
 
 - `invite_only`：sandbox導入中の設定。登録には有効な招待コードも必要。証明を提供できないSimulator等はpendingのまま登録できる。提供した証明が不正なら招待コードへfallbackしない。確認済みの登録は証明を省略できない。
 - `required`：公開時の設定。招待コードを必要とせず、検証済みの登録だけを受ける。Simulator・App Attest未対応端末・Apple障害は登録を拒否する。既存pendingのbearerも拒否し、初回証明を付けたセッション更新で昇格させる。`not_supported`というクライアント申告を信頼しない。
+- `required_with_invite`：配布前の実機検証用。登録には有効な招待コードとApp Attest証明の両方を求める。セッションの発行・利用には `required` と同じ証明・検証状態を求める。
 - environmentを跨いで鍵を使わない。App ID prefixはTeam IDと同一とは限らないため、Apple Developerの対象IDで照合する。署名済みentitlementと実機検証で確認した値は`PU5HXZ4FZ2.com.twitter-studio.Tweetbot`。開発・productionの許可版はリリース手順で管理する。
 - iOSはApp Attestのkey IDをThisDeviceOnlyのKeychainでインストール鍵と一緒に保存する。要求を直列化し、assertionの生成・送信順序を保つ。AppleのserverUnavailableでは同じ鍵とclientDataHashを再試行する。鍵の作り直しを要求のたびに行わない。再インストールは新しいidentityとする。
 - fraud metricの取得・refreshは含めない。Appleへreceiptを送る処理とDeviceCheckの署名秘密は別の運用判断とする。現行のtopic限定APNs鍵を流用しない。

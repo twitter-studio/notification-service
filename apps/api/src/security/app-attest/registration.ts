@@ -8,7 +8,7 @@ import type { appleAppAttest } from "./verifier";
 
 const Policy = z
   .object({
-    mode: z.enum(["invite_only", "required"]),
+    mode: z.enum(["invite_only", "required", "required_with_invite"]),
     appId: z.string().regex(/^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/),
     environment: z.enum(["development", "production"]),
     bundleVersions: z.array(z.string().min(1).max(128)).min(1).max(100),
@@ -41,7 +41,7 @@ export async function registrationProof(input: {
 }): Promise<SessionAttestation> {
   const policy = appAttestPolicy(input.env);
   if (input.proof === undefined) {
-    if (input.existing != null || policy.mode === "required") throw unauthorized();
+    if (input.existing != null || policy.mode !== "invite_only") throw unauthorized();
     return { kind: "none" };
   }
   try {
