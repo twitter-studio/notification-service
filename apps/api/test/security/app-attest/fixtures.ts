@@ -75,12 +75,14 @@ async function issue(
 export async function fixture(
   options: {
     clientData?: Uint8Array;
+    environment?: "development" | "production";
     attestationFlags?: number;
     assertionFlags?: number;
     assertionSignatureInput?: "nonce" | "composite";
   } = {},
 ) {
   const now = new Date();
+  const environment = options.environment ?? policy.environment;
   const attRoot = await issue("Attest Root", await keys(), undefined, true);
   const intermediate = await issue("Attest Intermediate", await keys(), attRoot, true);
   const receiptRoot = await issue("Receipt Root", await keys(), undefined, true);
@@ -100,7 +102,10 @@ export async function fixture(
   const ext = encode(
     new Map<string, unknown>([
       ["apple_bundle_version_01", "1"],
-      ["apple_validation_category_01", new Uint8Array([3, 0, 0, 0])],
+      [
+        "apple_validation_category_01",
+        new Uint8Array([environment === "production" ? 4 : 3, 0, 0, 0]),
+      ],
     ]),
   );
   const counter = new Uint8Array(4);
@@ -108,7 +113,9 @@ export async function fixture(
     await sha256(new TextEncoder().encode(policy.appId)),
     new Uint8Array([options.attestationFlags ?? 0x40]),
     counter,
-    new TextEncoder().encode("appattestdevelop"),
+    environment === "production"
+      ? concatenate(new TextEncoder().encode("appattest"), new Uint8Array(7))
+      : new TextEncoder().encode("appattestdevelop"),
     new Uint8Array([0, 32]),
     id,
     encode(
@@ -190,7 +197,7 @@ export async function fixture(
     attestation: attRoot.cert,
     receipt: receiptRoot.cert,
   });
-  const input = { object, keyId: id, clientData, policy, now };
+  const input = { object, keyId: id, clientData, policy: { ...policy, environment }, now };
   async function assertion(counterValue: number, assertionClientData = clientData) {
     const count = new Uint8Array(4);
     new DataView(count.buffer).setUint32(0, counterValue, false);

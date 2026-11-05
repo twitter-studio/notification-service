@@ -34,7 +34,14 @@ const Telemetry = z.discriminatedUnion("event", [
   }),
   z.object({
     event: z.literal("delivery_discarded"),
-    reason: z.enum(["attempt_limit", "invalid_job", "expired", "unauthorized", "inactive_device"]),
+    reason: z.enum([
+      "attempt_limit",
+      "invalid_job",
+      "expired",
+      "unauthorized",
+      "inactive_device",
+      "operations_paused",
+    ]),
   }),
 ]);
 

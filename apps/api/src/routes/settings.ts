@@ -14,6 +14,7 @@ import type { AppEnv } from "../app";
 import { requireSession } from "../middleware/session";
 import { eventKeyOf } from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
+import { requireDeliveryEnabled } from "../operations";
 import { ProblemError } from "../problem";
 import { challengeKeyFromEnv, InvalidChallengeError, verifyChallenge } from "../security/challenge";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
@@ -169,6 +170,7 @@ export function registerSettings(app: OpenAPIHono<AppEnv>, push: PushGateway) {
     return c.body(null, 204);
   });
   app.openapi(testRoute, async (c) => {
+    requireDeliveryEnabled(c.env);
     const session = c.get("session");
     await enforceRateLimit(
       c.env.INSTALLATION_RATE_LIMITER,

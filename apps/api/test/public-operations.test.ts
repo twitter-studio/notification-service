@@ -1,0 +1,160 @@
+import { createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { expect, it, vi } from "vitest";
+import { createApp } from "../src/app";
+import worker from "../src/index";
+import { challengeKeyFromEnv, issueChallenge } from "../src/security/challenge";
+import { toBase64Url } from "../src/security/encoding";
+import {
+  deleteAccountMessage,
+  enrollmentMessage,
+  sessionMessage,
+} from "../src/security/installation-key";
+import type { Enrolled } from "./helpers/api";
+import { newDeviceKey } from "./helpers/device-key";
+import { jsonHeaders } from "./helpers/http";
+import { fixture, policy } from "./security/app-attest/fixtures";
+
+const production = {
+  ...env,
+  APP_ATTEST_POLICY: JSON.stringify({ ...policy, mode: "required", environment: "production" }),
+};
+
+it("公開登録とAPNs送信を個別に停止しても、既存のセッション更新、設定、削除を続けられる", async () => {
+  const device = await newDeviceKey();
+  const key = await challengeKeyFromEnv(env);
+  const enrollment = (await issueChallenge(key, "enroll")).challenge;
+  const message = enrollmentMessage(enrollment, device.publicKey);
+  const attest = await fixture({
+    environment: "production",
+    clientData: new TextEncoder().encode(message),
+  });
+  const push = vi.fn(async () => ({ kind: "sent" as const }));
+  const sendDeviceVerification = vi.fn(async () => true);
+  const app = createApp({ appAttestVerifier: attest.verifier, push, sendDeviceVerification });
+  const request = (
+    config: typeof production,
+    path: string,
+    method: string,
+    body?: unknown,
+    token?: string,
+  ) =>
+    app.request(
+      `https://notification.test${path}`,
+      {
+        method,
+        headers: {
+          ...jsonHeaders(),
+          ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      },
+      config,
+    );
+  const body = {
+    challenge: enrollment,
+    public_key: device.publicKey,
+    signature: await device.sign(message),
+    app_attest: {
+      kind: "attestation",
+      key_id: toBase64Url(attest.input.keyId),
+      data: toBase64Url(attest.input.object),
+    },
+  };
+  const sendOnly = { ...production, PUBLIC_DELIVERY_ENABLED: "true" };
+  expect((await request(sendOnly, "/v1/enrollments", "POST", body)).status).toBe(403);
+  const enrollOnly = { ...production, PUBLIC_ENROLLMENT_ENABLED: "true" };
+  expect(
+    (await request(enrollOnly, "/v1/enrollments", "POST", { ...body, app_attest: undefined }))
+      .status,
+  ).toBe(401);
+  const registered = await request(enrollOnly, "/v1/enrollments", "POST", body);
+  expect(registered.status).toBe(201);
+  const owner = await registered.json<Enrolled>();
+  const paused = { ...production, PUBLIC_DELIVERY_ENABLED: "invalid" };
+
+  const check = (await issueChallenge(key, "session")).challenge;
+  const sessionProof = sessionMessage(check, owner.installation_id);
+  const renewed = await request(paused, "/v1/sessions", "POST", {
+    installation_id: owner.installation_id,
+    challenge: check,
+    signature: await device.sign(sessionProof),
+    app_attest: {
+      kind: "assertion",
+      key_id: body.app_attest.key_id,
+      data: toBase64Url(await attest.assertion(1, new TextEncoder().encode(sessionProof))),
+    },
+  });
+  expect(renewed.status).toBe(201);
+  const { session } = await renewed.json<{ session: { token: string } }>();
+  expect((await request(paused, "/v1/settings", "GET", undefined, session.token)).status).toBe(200);
+  const test = await request(paused, "/v1/notifications/test", "POST", undefined, session.token);
+  expect(test.status).toBe(503);
+  expect(test.headers.get("Retry-After")).toBe("900");
+  expect(
+    (
+      await request(
+        paused,
+        `/v1/devices/${owner.installation_id}`,
+        "PUT",
+        {
+          apns_token: "a".repeat(64),
+          apns_environment: "production",
+          topic: "com.twitter-studio.Tweetbot",
+          challenge: "",
+          signature: "",
+        },
+        session.token,
+      )
+    ).status,
+  ).toBe(503);
+  expect(owner.relay_secret).toBeDefined();
+  expect(
+    (
+      await request(
+        paused,
+        "/v1/notifications",
+        "POST",
+        {
+          event_id: "test-event",
+          type: "follow",
+          occurred_at: new Date().toISOString(),
+        },
+        owner.relay_secret,
+      )
+    ).status,
+  ).toBe(503);
+  expect(push).not.toHaveBeenCalled();
+  expect(sendDeviceVerification).not.toHaveBeenCalled();
+
+  const deletion = (await issueChallenge(key, "delete_account")).challenge;
+  expect(
+    (
+      await request(
+        paused,
+        "/v1/account",
+        "DELETE",
+        {
+          challenge: deletion,
+          signature: await device.sign(deleteAccountMessage(deletion, owner.installation_id)),
+        },
+        session.token,
+      )
+    ).status,
+  ).toBe(204);
+});
+
+it("公開配送の停止中に受け取った再送はAPNsへ送らず破棄する", async () => {
+  const id = crypto.randomUUID();
+  const batch = createMessageBatch("notification-apns-retries", [
+    { id, timestamp: new Date(), attempts: 1, body: {} },
+  ]);
+  const info = vi.spyOn(console, "info").mockImplementation(() => {});
+  try {
+    await worker.queue(batch, production);
+    expect((await getQueueResult(batch, createExecutionContext())).explicitAcks).toEqual([id]);
+    expect(info).toHaveBeenCalledWith({ event: "delivery_discarded", reason: "operations_paused" });
+  } finally {
+    info.mockRestore();
+  }
+});

@@ -1640,6 +1640,26 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "所有確認の送信を停止中",
+            "headers": {
+              "Retry-After": {
+                "description": "やり直すまで待つ秒数",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       },
