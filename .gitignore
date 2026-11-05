@@ -14,3 +14,6 @@ coverage/
 *.p8
 *.key
 key.txt
+
+# GitHub Environmentの変数から一時生成する配置設定。
+.sandbox-deploy-*.jsonc
