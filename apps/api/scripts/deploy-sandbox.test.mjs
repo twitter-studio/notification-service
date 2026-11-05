@@ -177,8 +177,15 @@ function fixture({
           result = { deployments: [{ versions: [{ version_id: versionID, percentage: 100 }] }] };
         else if (u.pathname.endsWith("/schedules"))
           result = { schedules: config.triggers.crons.map((cron) => ({ cron })) };
+        else if (u.pathname.endsWith(`/workers/workers/${config.name}`))
+          result = {
+            name: config.name,
+            subdomain: {
+              url: `https://${config.name}.${targetEnv.CF_WORKER_SUBDOMAIN}.workers.dev`,
+            },
+          };
         else if (u.pathname.endsWith("/workers/subdomain"))
-          result = { subdomain: targetEnv.CF_WORKER_SUBDOMAIN };
+          return new Response(null, { status: 403 });
         else {
           const empty = bootstrap && mutations === 0;
           result = {
@@ -564,7 +571,8 @@ test("公開productionの招待secret、異なるDB・Queue、滞留を配置前
         result.name = "notification-service-prod-verification";
     },
     (url, result) => {
-      if (url.pathname.endsWith("/workers/subdomain")) result.subdomain = "other";
+      if (url.pathname.includes("/workers/workers/"))
+        result.subdomain.url = `https://${publicEnv.WORKER_NAME}.other.workers.dev`;
     },
     (url, result) => {
       if (url.pathname.endsWith("/metrics")) result.backlog_count = 1;
