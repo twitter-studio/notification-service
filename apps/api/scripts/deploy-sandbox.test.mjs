@@ -217,7 +217,10 @@ test("migrationは別Environmentで確認し、D1操作だけを実行する", a
   const result = await executeDeployment(f.env, f);
   assert.equal(result.status, "migration_applied");
   assert.equal(f.count(), 1);
-  assert.equal(f.calls.filter((url) => url.startsWith("https://api.cloudflare.com")).length, 1);
+  assert.equal(
+    f.calls.filter((url) => new URL(url).origin === "https://api.cloudflare.com").length,
+    1,
+  );
 });
 
 test("KCVの安全な追加は配置前に許可し、配置後は完全一致を求める", () => {
