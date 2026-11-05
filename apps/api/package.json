@@ -7,7 +7,7 @@
     "typecheck": "wrangler types --check && tsc -p tsconfig.json && tsc -p test/tsconfig.json",
     "types": "wrangler types --env-file .dev.vars.example",
     "test": "vitest run && node --test scripts/*.test.mjs",
-    "build": "wrangler deploy --dry-run --outdir dist && wrangler deploy --config qa/wrangler.jsonc --dry-run --outdir dist/qa",
+    "build": "wrangler deploy --dry-run --outdir dist && wrangler deploy --config qa/wrangler.jsonc --dry-run --outdir dist/qa && wrangler deploy --config public-bootstrap/wrangler.jsonc --dry-run --outdir dist/public-bootstrap",
     "openapi": "vitest run test/openapi.test.ts --update",
     "check-alerts": "node scripts/check-alerts.mjs"
   },

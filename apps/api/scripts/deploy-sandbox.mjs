@@ -9,6 +9,9 @@ import { checkDeploymentGate, DeploymentFailure } from "./deployment-gate.mjs";
 const KIND = "service";
 const verificationWorker = "notification-service-prod-verification";
 const verificationQueue = "notification-apns-prod-verification";
+const publicWorker = "notification-service-production";
+const publicQueue = "notification-apns-production";
+const publicBootstrap = "PUBLIC_PRODUCTION_BOOTSTRAP";
 const directory = resolve(import.meta.dirname, "..");
 const name = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
 const Inputs = z.object({
@@ -34,7 +37,16 @@ const Inputs = z.object({
         }),
       }),
 });
-export function deploymentConfig(env, { productionVerification = false } = {}) {
+export function deploymentConfig(
+  env,
+  { productionVerification = false, publicProduction = false } = {},
+) {
+  if (productionVerification && publicProduction) throw new DeploymentFailure();
+  const expectedWorker = publicProduction
+    ? publicWorker
+    : productionVerification
+      ? verificationWorker
+      : "notification-service";
   const input = Inputs.parse(env);
   const configPath = resolve(
     directory,
@@ -43,11 +55,7 @@ export function deploymentConfig(env, { productionVerification = false } = {}) {
   const parsed = experimental_readRawConfig({ config: configPath });
   if (parsed.configPath !== configPath || parsed.redirected) throw new DeploymentFailure();
   const config = structuredClone(parsed.rawConfig);
-  if (
-    KIND === "service" &&
-    input.WORKER_NAME !== (productionVerification ? verificationWorker : "notification-service")
-  )
-    throw new DeploymentFailure();
+  if (KIND === "service" && input.WORKER_NAME !== expectedWorker) throw new DeploymentFailure();
   config.name = input.WORKER_NAME;
   config.account_id = input.CLOUDFLARE_ACCOUNT_ID;
   config.main = resolve(directory, "src/index.ts");
@@ -63,48 +71,63 @@ export function deploymentConfig(env, { productionVerification = false } = {}) {
       RELAY_URL: input.RELAY_URL,
     };
   } else {
-    if (productionVerification) {
+    if (productionVerification || publicProduction) {
       const database = config.d1_databases[0];
       if (input.D1_DATABASE_ID.toLowerCase() === database.database_id)
         throw new DeploymentFailure();
-      database.database_name = verificationWorker;
-      config.queues.producers[0].queue = verificationQueue;
-      config.queues.consumers[0].queue = verificationQueue;
+      database.database_name = expectedWorker;
+      const queueName = publicProduction ? publicQueue : verificationQueue;
+      config.queues.producers[0].queue = queueName;
+      config.queues.consumers[0].queue = queueName;
       config.limits = { cpu_ms: 1000 };
       for (const limit of config.ratelimits)
-        limit.namespace_id = String(Number(limit.namespace_id) + 100);
+        limit.namespace_id = String(Number(limit.namespace_id) + (publicProduction ? 200 : 100));
       const bundleVersion = z
         .string()
         .regex(/^[1-9][0-9]{0,8}$/)
         .parse(env.PROD_BUNDLE_VERSION);
+      const keyId = publicProduction ? "production" : "prod-verification";
       const keyChecks = z
         .strictObject({
           fingerprint: z.string().regex(/^[a-f0-9]{16}$/),
-          keys: z.strictObject({ "prod-verification": z.string().regex(/^[a-f0-9]{16}$/) }),
+          keys: z.strictObject({ [keyId]: z.string().regex(/^[a-f0-9]{16}$/) }),
         })
         .parse(JSON.parse(env.PROD_DEVICE_TOKEN_KEY_CHECKS));
       const sandboxChecks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
-      const checks = [keyChecks.fingerprint, keyChecks.keys["prod-verification"]];
+      const otherChecks = [sandboxChecks.fingerprint, ...Object.values(sandboxChecks.keys)];
+      if (publicProduction) {
+        const verificationChecks = z
+          .strictObject({
+            fingerprint: z.string().regex(/^[a-f0-9]{16}$/),
+            keys: z.strictObject({ "prod-verification": z.string().regex(/^[a-f0-9]{16}$/) }),
+          })
+          .parse(JSON.parse(env.VERIFICATION_DEVICE_TOKEN_KEY_CHECKS));
+        otherChecks.push(verificationChecks.fingerprint, ...Object.values(verificationChecks.keys));
+      }
+      const checks = [keyChecks.fingerprint, keyChecks.keys[keyId]];
       if (
         new Set(checks).size !== checks.length ||
-        checks.some((value) =>
-          [sandboxChecks.fingerprint, ...Object.values(sandboxChecks.keys)].includes(value),
-        )
+        checks.some((value) => otherChecks.includes(value))
       )
         throw new DeploymentFailure();
       config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(keyChecks);
       config.vars.APP_ATTEST_POLICY = JSON.stringify({
-        mode: "required_with_invite",
+        mode: publicProduction ? "required" : "required_with_invite",
         environment: "production",
         appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
         bundleVersions: [bundleVersion],
       });
+      if (publicProduction) {
+        config.vars.PUBLIC_ENROLLMENT_ENABLED = "false";
+        config.vars.PUBLIC_DELIVERY_ENABLED = "false";
+      }
     }
     config.d1_databases[0].database_id = input.D1_DATABASE_ID;
     config.d1_databases[0].migrations_dir = resolve(directory, "../../packages/db/migrations");
     const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
     if (
       !productionVerification &&
+      !publicProduction &&
       (policy.mode !== "invite_only" || policy.environment !== "development")
     )
       throw new DeploymentFailure();
@@ -125,7 +148,28 @@ const ExpectedSecrets =
         "DEVICE_TOKEN_KEYS",
         "ENROLLMENT_INVITE_CODE",
       ];
-export function checkSnapshot(snapshot, config, { before = false } = {}) {
+function expectedSecrets(publicProduction) {
+  return publicProduction
+    ? ExpectedSecrets.filter((name) => name !== "ENROLLMENT_INVITE_CODE")
+    : ExpectedSecrets;
+}
+function checkSecrets(bindings, publicProduction) {
+  const expected = expectedSecrets(publicProduction);
+  if (
+    expected.some(
+      (name) =>
+        !bindings.some((binding) => binding.name === name && binding.type === "secret_text"),
+    ) ||
+    (publicProduction &&
+      bindings.some(
+        (binding) =>
+          binding.name === "ENROLLMENT_INVITE_CODE" ||
+          (binding.type === "secret_text" && !expected.includes(binding.name)),
+      ))
+  )
+    throw new DeploymentFailure();
+}
+export function checkSnapshot(snapshot, config, { before = false, publicProduction = false } = {}) {
   const bindings = z
     .array(
       z.object({
@@ -137,6 +181,13 @@ export function checkSnapshot(snapshot, config, { before = false } = {}) {
       }),
     )
     .parse(snapshot.bindings);
+  if (
+    publicProduction &&
+    bindings.some(
+      (binding) => binding.type === "plain_text" && !Object.hasOwn(config.vars, binding.name),
+    )
+  )
+    throw new DeploymentFailure();
   for (const [key, value] of Object.entries(config.vars)) {
     const current = bindings.find(
       (binding) => binding.name === key && binding.type === "plain_text",
@@ -182,13 +233,7 @@ export function checkSnapshot(snapshot, config, { before = false } = {}) {
     )
   )
     throw new DeploymentFailure();
-  if (
-    ExpectedSecrets.some(
-      (name) =>
-        !bindings.some((binding) => binding.name === name && binding.type === "secret_text"),
-    )
-  )
-    throw new DeploymentFailure();
+  checkSecrets(bindings, publicProduction);
   if (
     KIND === "service" &&
     !bindings.some(
@@ -200,12 +245,33 @@ export function checkSnapshot(snapshot, config, { before = false } = {}) {
   )
     throw new DeploymentFailure();
 }
+function checkPublicQueue(details, config, id, bootstrap) {
+  const count = bootstrap ? 0 : 1;
+  const { producers = [], consumers = [] } = details;
+  if (
+    details.queue_id !== id ||
+    details.queue_name !== publicQueue ||
+    details.producers_total_count !== count ||
+    details.consumers_total_count !== count ||
+    producers.length !== count ||
+    consumers.length !== count ||
+    !producers.every((value) => value.type === "worker" && value.script === config.name) ||
+    !consumers.every(
+      (value) =>
+        value.type === "worker" &&
+        (value.script ?? value.script_name) === config.name &&
+        (value.script_name === undefined || value.script_name === config.name),
+    )
+  )
+    throw new DeploymentFailure();
+}
 export async function executeDeployment(
   env,
   {
     fetchImpl = fetch,
     runCommand = (command, args, options) => spawnSync(command, args, options),
     productionVerification = false,
+    publicProduction = false,
   } = {},
 ) {
   const request = await checkDeploymentGate(env, {
@@ -213,8 +279,12 @@ export async function executeDeployment(
     allowMigration: KIND === "service",
     requireApproval: true,
     productionVerification,
+    publicProduction,
   });
-  const { config, input, origin } = deploymentConfig(env, { productionVerification });
+  const { config, input, origin } = deploymentConfig(env, {
+    productionVerification,
+    publicProduction,
+  });
   if (!env.CLOUDFLARE_API_TOKEN || /[\r\n]/.test(env.CLOUDFLARE_API_TOKEN))
     throw new DeploymentFailure();
   const source = runCommand("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" });
@@ -253,35 +323,38 @@ export async function executeDeployment(
   }
   const worker = `workers/scripts/${config.name}`;
   const queue = `queues/${input.CF_QUEUE_ID}`;
-  if (productionVerification || request.operation === "migrate") {
+  if (publicProduction || productionVerification || request.operation === "migrate") {
     const db = await api(`d1/database/${input.D1_DATABASE_ID}`);
     if (db.uuid !== input.D1_DATABASE_ID || db.name !== config.d1_databases[0].database_name)
       throw new DeploymentFailure();
   }
   if (request.operation === "deploy") {
+    if (publicProduction) {
+      const subdomain = await api("workers/subdomain");
+      if (subdomain.subdomain !== input.CF_WORKER_SUBDOMAIN) throw new DeploymentFailure();
+    }
     const settings = await api(`${worker}/settings`);
-    if (
-      productionVerification &&
+    const bootstrap =
+      (productionVerification || publicProduction) &&
       settings.bindings?.some(
         (binding) =>
-          binding.name === "PRODUCTION_VERIFICATION_BOOTSTRAP" &&
+          binding.name ===
+            (publicProduction ? publicBootstrap : "PRODUCTION_VERIFICATION_BOOTSTRAP") &&
           binding.type === "plain_text" &&
           binding.text === "true",
-      )
-    ) {
-      if (
-        settings.bindings.length !== ExpectedSecrets.length + 1 ||
-        !ExpectedSecrets.every((name) =>
-          settings.bindings.some(
-            (binding) => binding.name === name && binding.type === "secret_text",
-          ),
-        )
-      )
+      );
+    if (bootstrap) {
+      if (settings.bindings.length !== expectedSecrets(publicProduction).length + 1)
         throw new DeploymentFailure();
+      checkSecrets(settings.bindings, publicProduction);
     } else {
-      checkSnapshot(settings, config, { before: !productionVerification });
+      checkSnapshot(settings, config, {
+        before: !productionVerification && !publicProduction,
+        publicProduction,
+      });
     }
     const details = await api(queue);
+    if (publicProduction) checkPublicQueue(details, config, input.CF_QUEUE_ID, bootstrap);
     const metrics = await api(`${queue}/metrics`);
     if (
       details.queue_name !== config.queues.producers[0].queue ||
@@ -324,11 +397,12 @@ export async function executeDeployment(
       /Current Version ID:\s*([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})/i,
     )?.[1];
     if (!version) throw new DeploymentFailure();
-    checkSnapshot(await api(`${worker}/settings`), config);
+    checkSnapshot(await api(`${worker}/settings`), config, { publicProduction });
     const deployments = await api(`${worker}/deployments`);
     const active = deployments.deployments?.[0]?.versions;
     if (active?.length !== 1 || active[0].version_id !== version || active[0].percentage !== 100)
       throw new DeploymentFailure();
+    if (publicProduction) checkPublicQueue(await api(queue), config, input.CF_QUEUE_ID, false);
     const metrics = await api(`${queue}/metrics`);
     if (metrics.backlog_count !== 0 || metrics.backlog_bytes !== 0) throw new DeploymentFailure();
     const schedules = await api(`${worker}/schedules`);
@@ -347,13 +421,53 @@ export async function executeDeployment(
             ["/webhooks/mock", "POST", 404],
           ]
         : [["/health", "GET", 200]];
-    for (const [path, method, status] of checks) {
-      const result = await response(origin + path, { method });
-      await result.body?.cancel();
-      if (result.status !== status) throw new DeploymentFailure();
+    if (publicProduction)
+      checks.push([
+        "/v1/enrollments",
+        "POST",
+        403,
+        { challenge: "", public_key: "", signature: "" },
+      ]);
+    for (const [path, method, status, body] of checks) {
+      const result = await response(origin + path, {
+        method,
+        ...(body === undefined
+          ? {}
+          : {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }),
+      });
+      if (result.status !== status) {
+        await result.body?.cancel();
+        throw new DeploymentFailure();
+      }
+      if (body === undefined) {
+        await result.body?.cancel();
+      } else {
+        const type = result.headers.get("Content-Type")?.split(";")[0]?.trim();
+        if (type !== "application/problem+json") {
+          await result.body?.cancel();
+          throw new DeploymentFailure();
+        }
+        const raw = await result.text();
+        if (raw.length > 4096) throw new DeploymentFailure();
+        const problem = JSON.parse(raw);
+        if (
+          problem.status !== 403 ||
+          problem.detail !== "Enrollment is not available." ||
+          !z.uuid().safeParse(problem.request_id).success ||
+          problem.request_id !== result.headers.get("X-Request-Id")
+        )
+          throw new DeploymentFailure();
+      }
     }
     return {
-      status: productionVerification ? "production_verification_deployed" : "sandbox_deployed",
+      status: publicProduction
+        ? "public_production_closed_deployed"
+        : productionVerification
+          ? "production_verification_deployed"
+          : "sandbox_deployed",
       sha: request.sha,
       version,
     };
@@ -367,6 +481,7 @@ if (import.meta.main) {
       JSON.stringify(
         await executeDeployment(process.env, {
           productionVerification: process.argv[2] === "production-verification",
+          publicProduction: process.argv[2] === "public-production",
         }),
       ),
     );

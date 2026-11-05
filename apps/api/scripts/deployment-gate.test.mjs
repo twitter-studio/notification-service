@@ -204,3 +204,18 @@ for (const entry of [
       DeploymentFailure,
     );
   });
+
+test("公開productionのEnvironmentは管理者bypassを明示的に禁止する", async () => {
+  for (const bypass of [undefined, true, false]) {
+    const r = remote((responses) => {
+      responses[0].name = "production";
+      responses[0].can_admins_bypass = bypass;
+    });
+    const run = checkDeploymentGate(environment({ PUBLIC_PRODUCTION_DEPLOY_ENABLED: "true" }), {
+      ...r,
+      publicProduction: true,
+    });
+    if (bypass === false) assert.equal((await run).environment, "production");
+    else await assert.rejects(run, DeploymentFailure);
+  }
+});

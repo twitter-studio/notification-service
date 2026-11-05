@@ -42,16 +42,34 @@ const productionEnv = {
     keys: { "prod-verification": "fedcba9876543210" },
   }),
 };
+const publicEnv = {
+  ...productionEnv,
+  PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "false",
+  PUBLIC_PRODUCTION_DEPLOY_ENABLED: "true",
+  WORKER_NAME: "notification-service-production",
+  PROD_BUNDLE_VERSION: "2",
+  VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: productionEnv.PROD_DEVICE_TOKEN_KEY_CHECKS,
+  PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+    fingerprint: "1111222233334444",
+    keys: { production: "5555666677778888" },
+  }),
+};
 function fixture({
   mutate = () => {},
   versionID = version,
   dirty = false,
   migrate = false,
   productionVerification = false,
+  publicProduction = false,
   bootstrap = false,
+  edgeForbidden = false,
 } = {}) {
-  const targetEnv = productionVerification ? productionEnv : env;
-  const target = productionVerification ? "production-verification" : "sandbox";
+  const targetEnv = publicProduction ? publicEnv : productionVerification ? productionEnv : env;
+  const target = publicProduction
+    ? "production"
+    : productionVerification
+      ? "production-verification"
+      : "sandbox";
   const environment = migrate ? `${target}-migrations` : target;
   const selectedEnv = migrate
     ? {
@@ -62,7 +80,7 @@ function fixture({
         SCHEMA_CONFIRMED: "false",
       }
     : targetEnv;
-  const { config } = deploymentConfig(targetEnv, { productionVerification });
+  const { config } = deploymentConfig(targetEnv, { productionVerification, publicProduction });
   const secrets =
     kind === "worker"
       ? ["RELAY_TOKEN", "X_EVENT_ID_SECRET", "X_OAUTH2_CLIENT_SECRET"]
@@ -71,7 +89,7 @@ function fixture({
           "CHALLENGE_SIGNING_KEY",
           "DEVICE_TOKEN_FINGERPRINT_KEY",
           "DEVICE_TOKEN_KEYS",
-          "ENROLLMENT_INVITE_CODE",
+          ...(publicProduction ? [] : ["ENROLLMENT_INVITE_CODE"]),
         ];
   const snapshot = {
     bindings: [
@@ -91,6 +109,7 @@ function fixture({
     snapshot,
     env: selectedEnv,
     productionVerification,
+    publicProduction,
     calls,
     count: () => mutations,
     fetchImpl: async (url, options) => {
@@ -110,6 +129,7 @@ function fixture({
         if (u.pathname.endsWith(`/${environment}`))
           return Response.json({
             name: environment,
+            can_admins_bypass: false,
             protection_rules: [
               {
                 type: "required_reviewers",
@@ -145,7 +165,9 @@ function fixture({
           if (bootstrap && mutations === 0) {
             result.bindings = result.bindings.filter((binding) => binding.type === "secret_text");
             result.bindings.push({
-              name: "PRODUCTION_VERIFICATION_BOOTSTRAP",
+              name: publicProduction
+                ? "PUBLIC_PRODUCTION_BOOTSTRAP"
+                : "PRODUCTION_VERIFICATION_BOOTSTRAP",
               type: "plain_text",
               text: "true",
             });
@@ -155,9 +177,39 @@ function fixture({
           result = { deployments: [{ versions: [{ version_id: versionID, percentage: 100 }] }] };
         else if (u.pathname.endsWith("/schedules"))
           result = { schedules: config.triggers.crons.map((cron) => ({ cron })) };
-        else result = { queue_name: config.queues.producers[0].queue };
+        else if (u.pathname.endsWith("/workers/subdomain"))
+          result = { subdomain: targetEnv.CF_WORKER_SUBDOMAIN };
+        else {
+          const empty = bootstrap && mutations === 0;
+          result = {
+            queue_id: targetEnv.CF_QUEUE_ID,
+            queue_name: config.queues.producers[0].queue,
+            producers_total_count: empty ? 0 : 1,
+            consumers_total_count: empty ? 0 : 1,
+            producers: empty ? [] : [{ type: "worker", script: config.name }],
+            consumers: empty ? [] : [{ type: "worker", script: config.name }],
+          };
+        }
         mutate(u, result);
         return Response.json({ success: true, result });
+      }
+      assert.equal(options.headers?.Authorization, undefined);
+      if (publicProduction && u.pathname === "/v1/enrollments") {
+        assert.equal(options.method, "POST");
+        assert.equal(options.headers["Content-Type"], "application/json");
+        assert.deepEqual(JSON.parse(options.body), {
+          challenge: "",
+          public_key: "",
+          signature: "",
+        });
+        if (edgeForbidden) return new Response("Forbidden", { status: 403 });
+        return Response.json(
+          { status: 403, detail: "Enrollment is not available.", request_id: version },
+          {
+            status: 403,
+            headers: { "Content-Type": "application/problem+json", "X-Request-Id": version },
+          },
+        );
       }
       assert.equal(options.headers, undefined);
       assert.equal(u.origin, `https://${targetEnv.WORKER_NAME}.synthetic.workers.dev`);
@@ -441,4 +493,130 @@ test("上限内の鍵IDとバージョン追加を許可する", () => {
   policy.bundleVersions.push("x".repeat(128));
   config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
   assert.doesNotThrow(() => checkSnapshot(f.snapshot, config, { before: true }));
+});
+
+test("公開productionの初期配置は専用資源を使い、登録と配送を閉じる", async () => {
+  const f = fixture({ publicProduction: true, bootstrap: true });
+  const { config } = deploymentConfig(
+    {
+      ...f.env,
+      PUBLIC_ENROLLMENT_ENABLED: "true",
+      PUBLIC_DELIVERY_ENABLED: "true",
+    },
+    f,
+  );
+  assert.equal(config.vars.PUBLIC_ENROLLMENT_ENABLED, "false");
+  assert.equal(config.vars.PUBLIC_DELIVERY_ENABLED, "false");
+  assert.equal(config.d1_databases[0].database_name, "notification-service-production");
+  assert.equal(config.queues.producers[0].queue, "notification-apns-production");
+  assert.deepEqual(
+    config.ratelimits.map((limit) => limit.namespace_id),
+    ["1201", "1202", "1203", "1204"],
+  );
+  assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY), {
+    appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
+    bundleVersions: ["2"],
+    environment: "production",
+    mode: "required",
+  });
+  assert.equal((await executeDeployment(f.env, f)).status, "public_production_closed_deployed");
+  assert.ok(f.calls.some((url) => url.endsWith("/environments/production")));
+  assert.ok(f.calls.every((url) => !url.includes("prod-verification")));
+});
+
+test("公開productionでは専用Environmentが無効、または検証Workerなら変更しない", async () => {
+  const f = fixture({ publicProduction: true });
+  await assert.rejects(
+    executeDeployment(
+      {
+        ...f.env,
+        PUBLIC_PRODUCTION_DEPLOY_ENABLED: "false",
+        PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "true",
+      },
+      f,
+    ),
+  );
+  assert.equal(f.calls.length, 0);
+  assert.throws(() => deploymentConfig({ ...f.env, WORKER_NAME: productionEnv.WORKER_NAME }, f));
+  assert.throws(() =>
+    deploymentConfig(
+      {
+        ...f.env,
+        PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+          fingerprint: "0123456789abcdef",
+          keys: { production: "5555666677778888" },
+        }),
+      },
+      f,
+    ),
+  );
+  assert.equal(f.count(), 0);
+});
+
+test("公開productionの招待secret、異なるDB・Queue、滞留を配置前に拒否する", async () => {
+  for (const change of [
+    (url, result) => {
+      if (url.pathname.endsWith("/settings"))
+        result.bindings.push({ name: "ENROLLMENT_INVITE_CODE", type: "secret_text" });
+    },
+    (url, result) => {
+      if (url.pathname.includes("/d1/database/"))
+        result.name = "notification-service-prod-verification";
+    },
+    (url, result) => {
+      if (url.pathname.endsWith("/workers/subdomain")) result.subdomain = "other";
+    },
+    (url, result) => {
+      if (url.pathname.endsWith("/metrics")) result.backlog_count = 1;
+    },
+    (url, result) => {
+      if (url.pathname.endsWith(`/queues/${publicEnv.CF_QUEUE_ID}`))
+        result.queue_name = "notification-apns-prod-verification";
+    },
+  ]) {
+    const f = fixture({ publicProduction: true, bootstrap: true, mutate: change });
+    await assert.rejects(executeDeployment(f.env, f));
+    assert.equal(f.count(), 0);
+  }
+});
+
+test("公開productionのQueueに別consumerがあれば初期配置しない", async () => {
+  const f = fixture({
+    publicProduction: true,
+    bootstrap: true,
+    mutate(url, result) {
+      if (url.pathname.endsWith(`/queues/${publicEnv.CF_QUEUE_ID}`)) {
+        result.consumers_total_count = 1;
+        result.consumers = [{ type: "http_pull" }];
+      }
+    },
+  });
+  await assert.rejects(executeDeployment(f.env, f));
+  assert.equal(f.count(), 0);
+});
+test("公開productionのmigrationには別Environmentを使い、公開Workerを更新しない", async () => {
+  const f = fixture({ publicProduction: true, migrate: true });
+  assert.equal((await executeDeployment(f.env, f)).status, "migration_applied");
+  assert.ok(f.calls.some((url) => url.endsWith("/environments/production-migrations")));
+  assert.ok(f.calls.every((url) => !url.includes("/workers/scripts/")));
+});
+
+test("Cloudflare側の403をアプリの登録停止の確認に使わない", async () => {
+  const f = fixture({ publicProduction: true, bootstrap: true, edgeForbidden: true });
+  await assert.rejects(executeDeployment(f.env, f));
+  assert.equal(f.count(), 1);
+});
+
+test("公開productionの配置後は専用Worker以外のconsumerを成功扱いしない", async () => {
+  const f = fixture({
+    publicProduction: true,
+    bootstrap: true,
+    mutate(url, result) {
+      if (url.pathname.endsWith(`/queues/${publicEnv.CF_QUEUE_ID}`) && f.count() === 1) {
+        result.consumers[0].script = "other-worker";
+      }
+    },
+  });
+  await assert.rejects(executeDeployment(f.env, f));
+  assert.equal(f.count(), 1);
 });
