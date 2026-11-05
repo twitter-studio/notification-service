@@ -187,7 +187,7 @@ function fixture({
             producers_total_count: empty ? 0 : 1,
             consumers_total_count: empty ? 0 : 1,
             producers: empty ? [] : [{ type: "worker", script: config.name }],
-            consumers: empty ? [] : [{ type: "worker", script_name: config.name }],
+            consumers: empty ? [] : [{ type: "worker", script: config.name }],
           };
         }
         mutate(u, result);
@@ -603,6 +603,20 @@ test("公開productionのmigrationには別Environmentを使い、公開Worker�
 
 test("Cloudflare側の403をアプリの登録停止の確認に使わない", async () => {
   const f = fixture({ publicProduction: true, bootstrap: true, edgeForbidden: true });
+  await assert.rejects(executeDeployment(f.env, f));
+  assert.equal(f.count(), 1);
+});
+
+test("公開productionの配置後は専用Worker以外のconsumerを成功扱いしない", async () => {
+  const f = fixture({
+    publicProduction: true,
+    bootstrap: true,
+    mutate(url, result) {
+      if (url.pathname.endsWith(`/queues/${publicEnv.CF_QUEUE_ID}`) && f.count() === 1) {
+        result.consumers[0].script = "other-worker";
+      }
+    },
+  });
   await assert.rejects(executeDeployment(f.env, f));
   assert.equal(f.count(), 1);
 });

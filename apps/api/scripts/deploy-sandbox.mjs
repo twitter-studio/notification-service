@@ -256,7 +256,12 @@ function checkPublicQueue(details, config, id, bootstrap) {
     producers.length !== count ||
     consumers.length !== count ||
     !producers.every((value) => value.type === "worker" && value.script === config.name) ||
-    !consumers.every((value) => value.type === "worker" && value.script_name === config.name)
+    !consumers.every(
+      (value) =>
+        value.type === "worker" &&
+        (value.script ?? value.script_name) === config.name &&
+        (value.script_name === undefined || value.script_name === config.name),
+    )
   )
     throw new DeploymentFailure();
 }
