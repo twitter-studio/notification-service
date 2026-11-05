@@ -10,10 +10,10 @@ App Attestの `required` は共有招待コードなしで登録できる。公�
 
 `APP_ATTEST_POLICY` の `mode=required` と `environment=production` の組み合わせに限り、登録と配送にそれぞれ明示の `true` を要求する。
 
-| 変数 | 対象 | `true` 以外 |
-| --- | --- | --- |
-| `PUBLIC_ENROLLMENT_ENABLED` | `POST /v1/enrollments` | 403。すでに発行された登録用チャレンジも使用できない。 |
-| `PUBLIC_DELIVERY_ENABLED` | 中継、テスト通知、端末の登録・更新、再送consumer | HTTPは503と `Retry-After`。停止中にconsumerが受け取ったジョブは破棄を記録してackする。 |
+| 変数                        | 対象                                             | `true` 以外                                                                            |
+| --------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `PUBLIC_ENROLLMENT_ENABLED` | `POST /v1/enrollments`                           | 403。停止中は発行済みのチャレンジを使った要求も拒否する。                              |
+| `PUBLIC_DELIVERY_ENABLED`   | 中継、テスト通知、端末の登録・更新、再送consumer | HTTPは503と `Retry-After`。停止中にconsumerが受け取ったジョブは破棄を記録してackする。 |
 
 既存のセッション更新、設定確認、配信オフ、資格情報の取り消し、削除には適用しない。招待制と開発環境は既存の挙動を維持する。スイッチはWorkerの配置単位で反映し、以前の版ですでに始まった処理やAPNs受理済みの通知には効かない。
 
