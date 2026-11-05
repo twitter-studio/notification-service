@@ -46,3 +46,15 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 詳細な障害・鍵更新・削除の運営用手順は [notification-docs](https://github.com/twitter-studio/notification-docs/blob/main/docs/operations/recovery.md) にある。非公開資料のため、アクセスできる管理者だけが参照する。公開コードの提供と、実際の運営サービスの利用登録・公開運用の承認は分ける。
 
 仕様の根拠: [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)、[Cloudflare権限](https://developers.cloudflare.com/workers/authorization/workers/)。
+
+## productionの実機検証用Worker
+
+対象は `notification-service-prod-verification` のWorkerとD1、`notification-apns-prod-verification` のQueueだけ。[検証計画](https://github.com/twitter-studio/notification-docs/blob/main/docs/operations/2026-11-05-qa003-production-plan.md)に沿って、初期リソースの作成・権限付与・秘密登録をそれぞれ承認後に実施する。
+
+1. 検証用Queueを保持24時間で作り、専用のD1と、外部入口を持たない初期Workerを用意する。初期Workerの平文変数は `PRODUCTION_VERIFICATION_BOOTSTRAP=true` だけとし、運営用の5つの秘密をCloudflareに登録する。Appleの鍵と登録用の秘密はGitHubのEnvironmentへコピーしない。
+2. `production-verification` と `production-verification-migrations` を作り、本人1名のrequired reviewer・main限定・管理者bypass禁止を設定する。資格情報を分け、migrationは対象D1のEdit、Worker配置は対象WorkerのEdit・対象アカウントのQueues管理・D1 Readに絞る。
+3. 両Environmentに `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_BUNDLE_VERSION`、`PROD_DEVICE_TOKEN_KEY_CHECKS` を設定する。build番号は配布物と同じ値にする。KCVには専用鍵の値を使い、`keys` の項目名を `prod-verification` とする。
+4. `PRODUCTION_VERIFICATION_DEPLOY_ENABLED` は既定false。承認された作業中だけtrueにする。 `Production notification verification` をmainのCI成功SHAで起動し、初期migrationとWorker配置を順に別runで承認する。作業後は有効化変数をfalseへ戻す。
+5. Worker名、D1・Queueのbinding、App Attestのproduction設定、稼働版100%、Queue空、Cron、healthを照合する。最初の実機登録後は招待secretの削除を別途実施し、既存登録のセッション更新とsandboxの稼働状態を確認する。
+
+この手順は承認された初回の1ビルドに限る。配置済みWorkerとの設定照合は完全一致を要求する。別のbuild番号で試験をやり直す場合は、検証アカウントと旧配布物の扱いを確定し、設定差分と配置を改めてレビューする。

@@ -3,15 +3,19 @@ export class DeploymentFailure extends Error {
     super("deployment_rejected");
   }
 }
-export function deploymentRequest(env, allowMigration = false) {
+export function deploymentRequest(env, allowMigration = false, productionVerification = false) {
   const operation = env.DEPLOY_OPERATION;
+  const enabled = productionVerification
+    ? env.PRODUCTION_VERIFICATION_DEPLOY_ENABLED
+    : env.SANDBOX_DEPLOY_ENABLED;
+  const target = productionVerification ? "production-verification" : "sandbox";
   if (
     env.GITHUB_ACTIONS !== "true" ||
     env.GITHUB_RUN_ATTEMPT !== "1" ||
     !/^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? "") ||
     env.GITHUB_EVENT_NAME !== "workflow_dispatch" ||
     env.GITHUB_REF !== "refs/heads/main" ||
-    env.SANDBOX_DEPLOY_ENABLED !== "true" ||
+    enabled !== "true" ||
     !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? "") ||
     env.DEPLOY_SHA !== env.GITHUB_SHA ||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY ?? "") ||
@@ -24,16 +28,21 @@ export function deploymentRequest(env, allowMigration = false) {
     throw new DeploymentFailure();
   return {
     operation,
-    environment: operation === "migrate" ? "sandbox-migrations" : "sandbox",
+    environment: operation === "migrate" ? `${target}-migrations` : target,
     sha: env.GITHUB_SHA,
     repository: env.GITHUB_REPOSITORY,
   };
 }
 export async function checkDeploymentGate(
   env,
-  { fetchImpl = fetch, allowMigration = false, requireApproval = false } = {},
+  {
+    fetchImpl = fetch,
+    allowMigration = false,
+    requireApproval = false,
+    productionVerification = false,
+  } = {},
 ) {
-  const request = deploymentRequest(env, allowMigration);
+  const request = deploymentRequest(env, allowMigration, productionVerification);
   if (!env.GH_TOKEN || /[\r\n]/.test(env.GH_TOKEN)) throw new DeploymentFailure();
   async function get(path) {
     const response = await fetchImpl(`https://api.github.com/repos/${request.repository}/${path}`, {
@@ -106,7 +115,11 @@ export async function checkDeploymentGate(
 }
 if (import.meta.main) {
   try {
-    await checkDeploymentGate(process.env, { allowMigration: process.argv[2] === "service" });
+    const productionVerification = process.argv[2] === "production-verification";
+    await checkDeploymentGate(process.env, {
+      allowMigration: productionVerification || process.argv[2] === "service",
+      productionVerification,
+    });
     console.log("deployment_gate_ok");
   } catch {
     console.error("deployment_gate_rejected");

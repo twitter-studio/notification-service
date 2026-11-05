@@ -31,17 +31,38 @@ const env = {
   X_USER_ID: "123",
   RELAY_URL: "https://relay.example.invalid",
 };
-function fixture({ mutate = () => {}, versionID = version, dirty = false, migrate = false } = {}) {
+const productionEnv = {
+  ...env,
+  SANDBOX_DEPLOY_ENABLED: "false",
+  PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "true",
+  WORKER_NAME: "notification-service-prod-verification",
+  PROD_BUNDLE_VERSION: "1",
+  PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+    fingerprint: "0123456789abcdef",
+    keys: { "prod-verification": "fedcba9876543210" },
+  }),
+};
+function fixture({
+  mutate = () => {},
+  versionID = version,
+  dirty = false,
+  migrate = false,
+  productionVerification = false,
+  bootstrap = false,
+} = {}) {
+  const targetEnv = productionVerification ? productionEnv : env;
+  const target = productionVerification ? "production-verification" : "sandbox";
+  const environment = migrate ? `${target}-migrations` : target;
   const selectedEnv = migrate
     ? {
-        ...env,
+        ...targetEnv,
         DEPLOY_OPERATION: "migrate",
         DEPLOY_CONFIRMATION: `migrate:${sha}`,
         BACKUP_CONFIRMED: "true",
         SCHEMA_CONFIRMED: "false",
       }
-    : env;
-  const { config } = deploymentConfig(env);
+    : targetEnv;
+  const { config } = deploymentConfig(targetEnv, { productionVerification });
   const secrets =
     kind === "worker"
       ? ["RELAY_TOKEN", "X_EVENT_ID_SECRET", "X_OAUTH2_CLIENT_SECRET"]
@@ -69,6 +90,7 @@ function fixture({ mutate = () => {}, versionID = version, dirty = false, migrat
   return {
     snapshot,
     env: selectedEnv,
+    productionVerification,
     calls,
     count: () => mutations,
     fetchImpl: async (url, options) => {
@@ -82,12 +104,12 @@ function fixture({ mutate = () => {}, versionID = version, dirty = false, migrat
             {
               state: "approved",
               user: { login: "owner" },
-              environments: [{ name: migrate ? "sandbox-migrations" : "sandbox" }],
+              environments: [{ name: environment }],
             },
           ]);
-        if (u.pathname.endsWith(migrate ? "/sandbox-migrations" : "/sandbox"))
+        if (u.pathname.endsWith(`/${environment}`))
           return Response.json({
-            name: migrate ? "sandbox-migrations" : "sandbox",
+            name: environment,
             protection_rules: [
               {
                 type: "required_reviewers",
@@ -117,9 +139,18 @@ function fixture({ mutate = () => {}, versionID = version, dirty = false, migrat
         assert.equal(options.headers.Authorization, "Bearer synthetic-cloudflare-secret");
         let result;
         if (u.pathname.includes("/d1/database/"))
-          result = { uuid: env.D1_DATABASE_ID, name: "notification-service" };
-        else if (u.pathname.endsWith("/settings")) result = structuredClone(snapshot);
-        else if (u.pathname.endsWith("/metrics")) result = { backlog_count: 0, backlog_bytes: 0 };
+          result = { uuid: env.D1_DATABASE_ID, name: config.d1_databases[0].database_name };
+        else if (u.pathname.endsWith("/settings")) {
+          result = structuredClone(snapshot);
+          if (bootstrap && mutations === 0) {
+            result.bindings = result.bindings.filter((binding) => binding.type === "secret_text");
+            result.bindings.push({
+              name: "PRODUCTION_VERIFICATION_BOOTSTRAP",
+              type: "plain_text",
+              text: "true",
+            });
+          }
+        } else if (u.pathname.endsWith("/metrics")) result = { backlog_count: 0, backlog_bytes: 0 };
         else if (u.pathname.endsWith("/deployments"))
           result = { deployments: [{ versions: [{ version_id: versionID, percentage: 100 }] }] };
         else if (u.pathname.endsWith("/schedules"))
@@ -129,7 +160,7 @@ function fixture({ mutate = () => {}, versionID = version, dirty = false, migrat
         return Response.json({ success: true, result });
       }
       assert.equal(options.headers, undefined);
-      assert.equal(u.origin, `https://${env.WORKER_NAME}.synthetic.workers.dev`);
+      assert.equal(u.origin, `https://${targetEnv.WORKER_NAME}.synthetic.workers.dev`);
       return new Response(null, { status: u.pathname === "/health" ? 200 : 404 });
     },
     runCommand: (command, args, options) => {
@@ -139,6 +170,8 @@ function fixture({ mutate = () => {}, versionID = version, dirty = false, migrat
       mutations++;
       const written = JSON.parse(readFileSync(args.at(-1), "utf8"));
       assert.equal(written.preview_urls, false);
+      assert.equal(written.name, targetEnv.WORKER_NAME);
+      assert.equal(written.d1_databases[0].database_name, config.d1_databases[0].database_name);
       assert.equal(JSON.stringify(written).includes("secret"), false);
       assert.equal(options.env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_ACCOUNT_ID);
       assert.equal(options.env.GH_TOKEN, undefined);
@@ -147,6 +180,71 @@ function fixture({ mutate = () => {}, versionID = version, dirty = false, migrat
     },
   };
 }
+test("production検証ではsandboxの資源・鍵の確認値・承認を使わない", async () => {
+  const f = fixture({ productionVerification: true, bootstrap: true });
+  const { config } = deploymentConfig(f.env, f);
+  assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY), {
+    appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
+    bundleVersions: ["1"],
+    environment: "production",
+    mode: "required_with_invite",
+  });
+  assert.deepEqual(
+    config.ratelimits.map((limit) => limit.namespace_id),
+    ["1101", "1102", "1103", "1104"],
+  );
+  const sandbox = deploymentConfig(env).config;
+  const sandboxDatabase = /"database_id":\s*"([a-f0-9-]{36})"/.exec(
+    readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+  )?.[1];
+  assert.ok(sandboxDatabase);
+  for (const overrides of [
+    { WORKER_NAME: env.WORKER_NAME },
+    { D1_DATABASE_ID: sandboxDatabase },
+    { PROD_DEVICE_TOKEN_KEY_CHECKS: sandbox.vars.DEVICE_TOKEN_KEY_CHECKS },
+  ])
+    assert.throws(() => deploymentConfig({ ...f.env, ...overrides }, f));
+  assert.equal((await executeDeployment(f.env, f)).status, "production_verification_deployed");
+  assert.ok(f.calls.some((url) => url.endsWith("/environments/production-verification")));
+  assert.ok(f.calls.every((url) => !url.includes("/environments/sandbox")));
+});
+test("production検証のD1 migrationは別の保護Environmentを使う", async () => {
+  const f = fixture({ productionVerification: true, migrate: true });
+  assert.equal((await executeDeployment(f.env, f)).status, "migration_applied");
+  assert.ok(
+    f.calls.some((url) => url.endsWith("/environments/production-verification-migrations")),
+  );
+});
+test("productionの有効化なしではsandboxの有効化があっても操作しない", async () => {
+  const f = fixture({ productionVerification: true });
+  await assert.rejects(
+    executeDeployment(
+      {
+        ...f.env,
+        SANDBOX_DEPLOY_ENABLED: "true",
+        PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "false",
+      },
+      f,
+    ),
+  );
+  assert.equal(f.calls.length, 0);
+});
+test("production検証のD1またはQueueが一致しなければ操作しない", async () => {
+  for (const path of ["/d1/database/", "/queues/"]) {
+    const f = fixture({
+      productionVerification: true,
+      bootstrap: true,
+      mutate: (url, data) => {
+        if (url.pathname.includes(path)) {
+          if ("name" in data) data.name = "notification-service";
+          if ("queue_name" in data) data.queue_name = "notification-apns-retries";
+        }
+      },
+    });
+    await assert.rejects(executeDeployment(f.env, f));
+    assert.equal(f.count(), 0);
+  }
+});
 test("停止中sandboxを更新し、稼働版・設定・Queue・Cron・公開入口を確認する", async () => {
   const f = fixture();
   const result = await executeDeployment(env, f);
