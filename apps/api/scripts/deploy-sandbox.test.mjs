@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { deploymentConfig, executeDeployment } from "./deploy-sandbox.mjs";
+import { checkSnapshot, deploymentConfig, executeDeployment } from "./deploy-sandbox.mjs";
 
 const kind = "service",
   sha = "a".repeat(40),
@@ -67,6 +67,7 @@ function fixture({ mutate = () => {}, versionID = version, dirty = false, migrat
   const calls = [];
   let mutations = 0;
   return {
+    snapshot,
     env: selectedEnv,
     calls,
     count: () => mutations,
@@ -217,4 +218,126 @@ test("migrationは別Environmentで確認し、D1操作だけを実行する", a
   assert.equal(result.status, "migration_applied");
   assert.equal(f.count(), 1);
   assert.equal(f.calls.filter((url) => url.startsWith("https://api.cloudflare.com")).length, 1);
+});
+
+test("KCVの安全な追加は配置前に許可し、配置後は完全一致を求める", () => {
+  const f = fixture();
+  const { config } = deploymentConfig(env);
+  const next = structuredClone(config);
+  const checks = JSON.parse(next.vars.DEVICE_TOKEN_KEY_CHECKS);
+  checks.keys["synthetic-new-key"] = "1111111111111111";
+  next.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(checks);
+  assert.doesNotThrow(() => checkSnapshot(f.snapshot, next, { before: true }));
+  assert.throws(() => checkSnapshot(f.snapshot, next));
+});
+test("App Attestの許可バージョン追加は配置前に許可する", () => {
+  const f = fixture();
+  const { config } = deploymentConfig(env);
+  const next = structuredClone(config);
+  const policy = JSON.parse(next.vars.APP_ATTEST_POLICY);
+  policy.bundleVersions.push("2");
+  next.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
+  assert.doesNotThrow(() => checkSnapshot(f.snapshot, next, { before: true }));
+  assert.throws(() => checkSnapshot(f.snapshot, next));
+});
+
+for (const [name, change] of [
+  [
+    "指紋鍵KCV変更",
+    (checks) => {
+      checks.fingerprint = "ffffffffffffffff";
+    },
+  ],
+  [
+    "旧暗号鍵のKCV変更",
+    (checks) => {
+      checks.keys[Object.keys(checks.keys)[0]] = "ffffffffffffffff";
+    },
+  ],
+  [
+    "旧暗号鍵の削除",
+    (checks) => {
+      delete checks.keys[Object.keys(checks.keys)[0]];
+    },
+  ],
+])
+  test(`${name}は通常配置で許可しない`, () => {
+    const f = fixture();
+    const { config } = deploymentConfig(env);
+    const checks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
+    change(checks);
+    config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(checks);
+    assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
+  });
+for (const [name, change] of [
+  [
+    "App ID変更",
+    (policy) => {
+      policy.appId = "other.example";
+    },
+  ],
+  [
+    "productionへ変更",
+    (policy) => {
+      policy.environment = "production";
+    },
+  ],
+  [
+    "requiredへ変更",
+    (policy) => {
+      policy.mode = "required";
+    },
+  ],
+  [
+    "既存バージョンの削除",
+    (policy) => {
+      policy.bundleVersions = ["other"];
+    },
+  ],
+])
+  test(`${name}は通常配置で許可しない`, () => {
+    const f = fixture();
+    const { config } = deploymentConfig(env);
+    const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
+    change(policy);
+    config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
+    assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
+  });
+
+for (const id of ["bad key", "k".repeat(33)])
+  test(`不正な暗号鍵IDの追加を拒否する ${id}`, () => {
+    const f = fixture();
+    const { config } = deploymentConfig(env);
+    const checks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
+    checks.keys[id] = "1111111111111111";
+    config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(checks);
+    assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
+  });
+for (const version of ["x".repeat(129), ""])
+  test(`実行時に読めないバージョンの追加を拒否する ${version.length}`, () => {
+    const f = fixture();
+    const { config } = deploymentConfig(env);
+    const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
+    policy.bundleVersions.push(version);
+    config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
+    assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
+  });
+test("100件を超える許可バージョンを配置しない", () => {
+  const f = fixture();
+  const { config } = deploymentConfig(env);
+  const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
+  policy.bundleVersions.push(...Array.from({ length: 100 }, (_, i) => String(i + 2)));
+  config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
+  assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
+});
+test("上限内の鍵IDとバージョン追加を許可する", () => {
+  const f = fixture();
+  const { config } = deploymentConfig(env);
+  const checks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
+  checks.keys["k".repeat(32)] = "1111111111111111";
+  config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(checks);
+  const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
+  policy.bundleVersions.push("x".repeat(128));
+  config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
+  assert.doesNotThrow(() => checkSnapshot(f.snapshot, config, { before: true }));
 });

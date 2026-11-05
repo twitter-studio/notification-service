@@ -80,7 +80,7 @@ const ExpectedSecrets =
         "DEVICE_TOKEN_KEYS",
         "ENROLLMENT_INVITE_CODE",
       ];
-export function checkSnapshot(snapshot, config) {
+export function checkSnapshot(snapshot, config, { before = false } = {}) {
   const bindings = z
     .array(
       z.object({
@@ -92,14 +92,42 @@ export function checkSnapshot(snapshot, config) {
       }),
     )
     .parse(snapshot.bindings);
-  for (const [key, value] of Object.entries(config.vars))
-    if (
-      !bindings.some(
-        (binding) =>
-          binding.name === key && binding.type === "plain_text" && binding.text === value,
+  for (const [key, value] of Object.entries(config.vars)) {
+    const current = bindings.find(
+      (binding) => binding.name === key && binding.type === "plain_text",
+    );
+    if (!current) throw new DeploymentFailure();
+    if (before && key === "DEVICE_TOKEN_KEY_CHECKS") {
+      const schema = z.strictObject({
+        fingerprint: z.string().regex(/^[a-f0-9]{16}$/),
+        keys: z.record(
+          z.string().regex(/^[A-Za-z0-9_-]{1,32}$/),
+          z.string().regex(/^[a-f0-9]{16}$/),
+        ),
+      });
+      const oldChecks = schema.parse(JSON.parse(current.text));
+      const newChecks = schema.parse(JSON.parse(value));
+      if (
+        oldChecks.fingerprint !== newChecks.fingerprint ||
+        !Object.entries(oldChecks.keys).every(([id, kcv]) => newChecks.keys[id] === kcv)
       )
-    )
-      throw new DeploymentFailure();
+        throw new DeploymentFailure();
+    } else if (before && key === "APP_ATTEST_POLICY") {
+      const schema = z.strictObject({
+        mode: z.literal("invite_only"),
+        environment: z.literal("development"),
+        appId: z.string().regex(/^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/),
+        bundleVersions: z.array(z.string().min(1).max(128)).min(1).max(100),
+      });
+      const oldPolicy = schema.parse(JSON.parse(current.text));
+      const newPolicy = schema.parse(JSON.parse(value));
+      if (
+        oldPolicy.appId !== newPolicy.appId ||
+        !oldPolicy.bundleVersions.every((version) => newPolicy.bundleVersions.includes(version))
+      )
+        throw new DeploymentFailure();
+    } else if (current.text !== value) throw new DeploymentFailure();
+  }
   if (
     !bindings.some(
       (binding) =>
@@ -179,7 +207,7 @@ export async function executeDeployment(
   const worker = `workers/scripts/${config.name}`;
   const queue = `queues/${input.CF_QUEUE_ID}`;
   if (request.operation === "deploy") {
-    checkSnapshot(await api(`${worker}/settings`), config);
+    checkSnapshot(await api(`${worker}/settings`), config, { before: true });
     const details = await api(queue);
     const metrics = await api(`${queue}/metrics`);
     if (
