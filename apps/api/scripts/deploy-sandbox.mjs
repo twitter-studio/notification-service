@@ -330,8 +330,9 @@ export async function executeDeployment(
   }
   if (request.operation === "deploy") {
     if (publicProduction) {
-      const subdomain = await api("workers/subdomain");
-      if (subdomain.subdomain !== input.CF_WORKER_SUBDOMAIN) throw new DeploymentFailure();
+      const workerRecord = await api(`workers/workers/${config.name}`);
+      if (workerRecord?.name !== config.name || workerRecord.subdomain?.url !== origin)
+        throw new DeploymentFailure();
     }
     const settings = await api(`${worker}/settings`);
     const bootstrap =
