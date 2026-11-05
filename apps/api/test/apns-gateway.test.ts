@@ -2,6 +2,7 @@ import { createExecutionContext, createMessageBatch, getQueueResult } from "clou
 import { env } from "cloudflare:workers";
 import {
   createDb,
+  deleteAccountFromInstallation,
   disableDeviceByUser,
   listActiveDevices,
   registerDeviceToken,
@@ -195,6 +196,45 @@ describe("APNs の遅延再送", () => {
     expect(result.explicitAcks).toEqual([id]);
     expect(test.send).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["relay", "installation"] as const)(
+    "削除前に受け付けた %s の再送は、削除後に配送せず確認応答する",
+    async (kind) => {
+      const account = await accountWithDevice();
+      const test = await setup();
+      const target: PushTarget = {
+        ...account.target,
+        authority:
+          kind === "relay"
+            ? account.target.authority
+            : { kind, installationId: account.owner.installationId },
+      };
+      const outgoing = notification();
+      if (kind === "installation") outgoing.payload.event_type = "test";
+      expect(
+        await test.gateway.push(target, outgoing, { signal: new AbortController().signal }),
+      ).toEqual({ kind: "queued" });
+      expect(test.jobs).toHaveLength(1);
+      expect(
+        await deleteAccountFromInstallation(createDb(env.DB), {
+          ...account.owner,
+          challenge: consumedChallenge(),
+        }),
+      ).toBe(true);
+      test.setStatus(200);
+      test.advance(990_000);
+      const info = vi.spyOn(console, "info");
+      try {
+        const { id, result } = await consume(test.gateway, test.jobs[0]);
+        expect(result.explicitAcks).toEqual([id]);
+        expect(result.retryMessages).toEqual([]);
+        expect(test.send).toHaveBeenCalledTimes(1);
+        expect(info).toHaveBeenCalledWith({ event: "delivery_discarded", reason: "unauthorized" });
+      } finally {
+        info.mockRestore();
+      }
+    },
+  );
 
   it("一時障害だけ Queue に渡し、平文トークンや署名鍵を残さず、同じ ID で再送する", async () => {
     const account = await accountWithDevice();
