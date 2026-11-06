@@ -88,6 +88,8 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 2. `Public production deployment` を `operation=deploy`、`public_mode=open`、`confirmation=deploy-open:完全SHA` で起動する。試験用の入力は空にし、対象buildを `PROD_BUNDLE_VERSION` と照合する。オーナー本人が `production` Environment を承認する。
 3. `public_production_open_deployed` を確認する。Workflowは配置後に登録・配送の設定が両方trueで、healthが200であることを照合する。登録入口には無効なチャレンジを送り、アプリから401が返ることを確認する。実際の登録、所有確認、配送は対象端末で別途確認する。終了後は `PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` に戻す。
 
+端末を順に更新するときは、`production` Environment の `PROD_BUNDLE_VERSION` に新しい配布ビルド番号を設定し、Workflow の `build_overlap` 入力に新旧の番号を「新,旧」の順で指定する。承認前に入力の両方を照合する。旧ビルドは稼働中の許可リストにあるものを1つ指定できる。更新が済んだら `build_overlap` を空欄にして通常の保護付き配置を行う。
+
 通常運用への配置runが失敗した場合は、稼働版と両スイッチを確認する。通常運用が反映されていて停止が必要なら、次の手順で緊急停止する。
 
 ### 登録と配送を緊急停止する

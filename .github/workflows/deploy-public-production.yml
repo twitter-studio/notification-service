@@ -52,6 +52,10 @@ on:
         description: 実X再試験で許可する公開用の中継資格情報ID
         type: string
         required: false
+      build_overlap:
+        description: 端末を順に更新する場合の新旧ビルド（新,旧）
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -122,6 +126,7 @@ jobs:
           WORKER_NAME: ${{ vars.WORKER_NAME }}
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
           PROD_BUNDLE_VERSION: ${{ vars.PROD_BUNDLE_VERSION }}
+          PUBLIC_BUILD_OVERLAP: ${{ inputs.build_overlap }}
           VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: ${{ vars.VERIFICATION_DEVICE_TOKEN_KEY_CHECKS }}
           PROD_DEVICE_TOKEN_KEY_CHECKS: ${{ vars.PROD_DEVICE_TOKEN_KEY_CHECKS }}
         run: node apps/api/scripts/deploy-sandbox.mjs public-production
