@@ -97,7 +97,7 @@ export function deploymentConfig(
         const [next, previous] = z
           .tuple([z.literal(bundleVersion), z.string().regex(/^[1-9][0-9]{0,8}$/)])
           .parse(env.PUBLIC_BUILD_OVERLAP.split(","));
-        if (!publicProduction || publicDeploymentMode(env) !== "open" || next === previous)
+        if (!publicProduction || publicDeploymentMode(env) === "closed" || next === previous)
           throw new DeploymentFailure();
         bundleVersions.push(previous);
       }
@@ -254,11 +254,14 @@ export function checkSnapshot(
             .refine((versions) => new Set(versions).size === versions.length),
         })
         .parse(JSON.parse(current.text));
-      if (
-        policy.bundleVersions.length === 2 &&
-        !currentPolicy.bundleVersions.includes(policy.bundleVersions[1])
-      )
-        throw new DeploymentFailure();
+      if (policy.bundleVersions.length === 2) {
+        const buildsToKeep =
+          config.vars.PUBLIC_ENROLLMENT_ENABLED === "true"
+            ? [policy.bundleVersions[1]]
+            : policy.bundleVersions;
+        if (!buildsToKeep.every((version) => currentPolicy.bundleVersions.includes(version)))
+          throw new DeploymentFailure();
+      }
     } else if (publicProduction && publicPreflight && publicSwitches.includes(key)) {
       z.enum(["true", "false"]).parse(current.text);
       if (config.vars.PUBLIC_TRIAL && current.text !== "false") throw new DeploymentFailure();
@@ -420,7 +423,7 @@ export async function executeDeployment(
         throw new DeploymentFailure();
     }
     const settings =
-      publicProduction && (migration || publicMode === "open")
+      publicProduction && (migration || publicMode === "open" || env.PUBLIC_BUILD_OVERLAP)
         ? await versionSettings(singleActiveVersion(await stateApi(`${worker}/deployments`)))
         : await stateApi(`${worker}/settings`);
     const bootstrap =

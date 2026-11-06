@@ -664,6 +664,28 @@ test("公開productionは端末の移行中に新旧2ビルドを受け付け、
   assert.equal(invalid.count(), 0);
 });
 
+test("公開productionの緊急停止は移行中の新旧ビルドを維持し、新しいビルドは追加しない", async () => {
+  for (const active of [["2", "1"], ["1"]]) {
+    const f = fixture({
+      publicProduction: true,
+      mode: "stop",
+      trial: { PUBLIC_BUILD_OVERLAP: "2,1" },
+      mutate(url, settings) {
+        if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
+        const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+        binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: active });
+      },
+    });
+    if (active.length === 2) {
+      assert.equal((await executeDeployment(f.env, f)).status, "public_production_stop_deployed");
+      assert.equal(f.count(), 1);
+    } else {
+      await assert.rejects(executeDeployment(f.env, f));
+      assert.equal(f.count(), 0);
+    }
+  }
+});
+
 test("公開productionの許可ビルド更新はApp IDの相違や配置後の旧ビルドを拒否する", async () => {
   for (const after of [false, true]) {
     const f = fixture({
