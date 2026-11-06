@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { DeviceTokenKeys } from "../security/device-token";
-import { toBase64Url } from "../security/encoding";
+import { fromBase64Url, toBase64Url } from "../security/encoding";
 
 // 利用者の Worker から受け付けるイベントと、端末へ送る通知の中身 (ADR-0009)。
 
@@ -32,6 +32,18 @@ export const NotificationPreview = z.strictObject({
 });
 type NotificationPreview = z.infer<typeof NotificationPreview>;
 
+export const DmPreviewEventID = z.string().regex(/^x2_[A-Za-z0-9_-]{43}$/);
+export const SealedDmPreview = z
+  .string()
+  .min(39)
+  .max(3400)
+  .regex(/^[A-Za-z0-9_-]+$/)
+  .refine((value) => fromBase64Url(value) !== undefined);
+export const DmPreviewPayload = z.strictObject({
+  event_id: DmPreviewEventID,
+  sealed: SealedDmPreview,
+});
+
 export type RelayEvent = {
   eventId: string;
   type: EventType;
@@ -39,6 +51,7 @@ export type RelayEvent = {
   postId?: string | undefined;
   routeId?: NotificationRouteID | undefined;
   preview?: NotificationPreview | undefined;
+  sealedDmPreview?: string | undefined;
 };
 
 /** ツイートを指さない種類。これらは `post_id` を受けない (ほかの種類は、`post_id` が要る)。 */
@@ -75,35 +88,49 @@ const NotificationMessage = z.enum([
   "You have a new notification.",
   "You have a new direct message.",
 ]);
+export const DmPreviewFallbackAlert = z.strictObject({
+  title: z.literal("Tweetbot"),
+  "loc-key": z.literal("You have a new direct message."),
+});
 export const NotificationAlert = z.union([
+  DmPreviewFallbackAlert,
   z.strictObject({ "loc-key": NotificationMessage }),
   z.strictObject({ title: z.string().regex(/^@[A-Za-z0-9_]{1,15}$/), body: PreviewExcerpt }),
 ]);
 
 export type NotificationPayload = {
-  aps: { alert: z.infer<typeof NotificationAlert>; sound: "default" };
+  aps: { alert: z.infer<typeof NotificationAlert>; sound: "default"; "mutable-content"?: 1 };
   event_type: EventType | "test";
   post_id?: string;
   route_id?: NotificationRouteID;
+  dm_preview?: z.infer<typeof DmPreviewPayload>;
 };
 
 export function notificationPayload(event: RelayEvent): NotificationPayload {
   const preview = event.type === "follow" || event.type === "dm" ? undefined : event.preview;
+  const dmPreview =
+    event.type === "dm" && event.routeId !== undefined && event.sealedDmPreview !== undefined
+      ? { event_id: event.eventId, sealed: event.sealedDmPreview }
+      : undefined;
   return {
     aps: {
       alert:
-        preview === undefined
-          ? {
-              "loc-key":
-                event.type === "dm"
-                  ? "You have a new direct message."
-                  : "You have a new notification.",
-            }
-          : { title: `@${preview.author}`, body: preview.excerpt },
+        dmPreview !== undefined
+          ? { title: "Tweetbot", "loc-key": "You have a new direct message." }
+          : preview === undefined
+            ? {
+                "loc-key":
+                  event.type === "dm"
+                    ? "You have a new direct message."
+                    : "You have a new notification.",
+              }
+            : { title: `@${preview.author}`, body: preview.excerpt },
       sound: "default",
+      ...(dmPreview === undefined ? {} : { "mutable-content": 1 }),
     },
     event_type: event.type,
     ...(event.postId === undefined ? {} : { post_id: event.postId }),
     ...(event.routeId === undefined ? {} : { route_id: event.routeId }),
+    ...(dmPreview === undefined ? {} : { dm_preview: dmPreview }),
   };
 }

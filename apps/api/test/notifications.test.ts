@@ -113,6 +113,48 @@ describe("中継の受け付け", () => {
     },
   );
 
+  it("DM の暗号文だけを受け付けて、定型文付きの通知として中継する", async () => {
+    const { app, sent } = appWithPush();
+    const recipient = await accountWithDevice();
+    await accountWithDevice();
+    const routeID = crypto.randomUUID();
+    const sealed = "A".repeat(3400);
+    const event = newEvent({
+      event_id: `x2_${"A".repeat(43)}`,
+      type: "dm",
+      post_id: undefined,
+      route_id: routeID,
+      dm_preview: sealed,
+    });
+    expect(
+      (await relay(app, recipient.enrolled.relay_secret, { ...event, type: "follow" })).status,
+    ).toBe(422);
+    expect(
+      (
+        await relay(app, recipient.enrolled.relay_secret, {
+          ...event,
+          dm_preview: "A".repeat(3401),
+        })
+      ).status,
+    ).toBe(422);
+    expect((await relay(app, recipient.enrolled.relay_secret, event)).status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      target: { apnsToken: recipient.apnsToken },
+      notification: {
+        payload: {
+          aps: {
+            alert: { title: "Tweetbot", "loc-key": "You have a new direct message." },
+            "mutable-content": 1,
+          },
+          event_type: "dm",
+          route_id: routeID,
+          dm_preview: { event_id: event.event_id, sealed },
+        },
+      },
+    });
+  });
+
   it.each([
     ["follow", { author: "example", excerpt: "preview" }],
     ["dm", { author: "example", excerpt: "preview" }],

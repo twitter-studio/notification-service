@@ -15,12 +15,14 @@ import type { AppEnv, RelayEnv } from "../app";
 import { ACCEPTED_EVENT_RETENTION_MS, CLEANUP_INTERVAL_MS } from "../maintenance";
 import { requireRelayCredential } from "../middleware/relay";
 import {
+  DmPreviewEventID,
   EVENT_TYPES,
   EVENT_TYPES_WITHOUT_POST,
   eventKeyOf,
   NotificationPreview,
   NotificationRouteID,
   notificationPayload,
+  SealedDmPreview,
 } from "../notifications/payload";
 import type { PushGateway, PushOutcome } from "../notifications/push";
 import { requireDeliveryEnabled } from "../operations";
@@ -71,6 +73,9 @@ const EventSchema = z
     preview: NotificationPreview.optional().openapi({
       description:
         "メンション・返信・引用ツイート・リツイート・いいねのみ。通知を起こした公開アカウントの @ を除いたユーザー名と、公開ツイート本文の抜粋",
+    }),
+    dm_preview: SealedDmPreview.optional().openapi({
+      description: "DM 専用の暗号文。アカウントルートとイベント ID に結び付け、端末で復号する",
     }),
     occurred_at: z.iso
       .datetime()
@@ -140,6 +145,15 @@ export function registerNotifications(
       throw new ProblemError(422, "Unprocessable Content", "The preview does not match the type.");
     if (body.type === "dm" && body.route_id === undefined)
       throw new ProblemError(422, "Unprocessable Content", "A DM requires an account route.");
+    if (
+      body.dm_preview !== undefined &&
+      (body.type !== "dm" || !DmPreviewEventID.safeParse(body.event_id).success)
+    )
+      throw new ProblemError(
+        422,
+        "Unprocessable Content",
+        "The encrypted preview does not match the event.",
+      );
     const now = new Date();
     const occurredAt = Date.parse(body.occurred_at);
     if (
@@ -231,6 +245,7 @@ export function registerNotifications(
           postId: body.post_id,
           routeId: body.route_id,
           preview: body.preview,
+          sealedDmPreview: body.dm_preview,
         }),
       };
       for (const device of devices) {
