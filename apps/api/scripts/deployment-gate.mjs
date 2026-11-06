@@ -6,7 +6,8 @@ export class DeploymentFailure extends Error {
 export function publicTrial(env) {
   const { PUBLIC_TRIAL_UNTIL: deadline, PUBLIC_TRIAL_INVITE_HASH: inviteHash } = env;
   const resume = env.PUBLIC_TRIAL_RESUME === "true";
-  if (!deadline && !inviteHash && !resume) return;
+  const relayId = env.PUBLIC_TRIAL_RELAY_CREDENTIAL_ID;
+  if (!deadline && !inviteHash && !resume && !relayId) return;
   const now = Date.now();
   const until = Date.parse(deadline ?? "");
   if (
@@ -15,10 +16,11 @@ export function publicTrial(env) {
     new Date(until).toISOString().replace(".000Z", "Z") !== deadline ||
     until <= now ||
     until > now + 2 * 60 * 60 * 1000 ||
+    (relayId && (!resume || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(relayId))) ||
     (resume ? Boolean(inviteHash) : !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(inviteHash ?? ""))
   )
     throw new DeploymentFailure();
-  return resume ? { until, resume } : { until, inviteHash };
+  return resume ? { until, resume, ...(relayId ? { relayId } : {}) } : { until, inviteHash };
 }
 
 export function deploymentRequest(

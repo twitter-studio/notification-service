@@ -144,6 +144,31 @@ it("公開実機試験は招待とApp Attestを要求し、期限後は登録と
     resume,
   );
   expect(relay.status).toBe(503);
+  const authorizedRelay = {
+    ...resume,
+    PUBLIC_TRIAL: JSON.stringify({
+      until,
+      resume: true,
+      relayId: owner.relay_credential_id,
+    }),
+  };
+  const mention = (config: typeof trial) =>
+    app.request(
+      "https://notification.test/v1/notifications",
+      {
+        method: "POST",
+        headers: { ...jsonHeaders(), Authorization: `Bearer ${owner.relay_secret}` },
+        body: JSON.stringify({
+          event_id: "trial-mention",
+          type: "mention",
+          post_id: "12345",
+          occurred_at: new Date().toISOString(),
+        }),
+      },
+      config,
+    );
+  expect((await mention(resume)).status).toBe(503);
+  expect((await mention(authorizedRelay)).status).toBe(202);
   const resumedTest = await app.request(
     "https://notification.test/v1/notifications/test",
     { method: "POST", headers: { Authorization: `Bearer ${owner.session.token}` } },

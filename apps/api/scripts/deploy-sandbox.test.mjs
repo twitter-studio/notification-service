@@ -165,10 +165,15 @@ function fixture({
         let result;
         if (u.pathname.endsWith("/query")) {
           assert.equal(options.method, "POST");
-          const { sql } = JSON.parse(options.body);
+          const { sql, params } = JSON.parse(options.body);
           if (trial.PUBLIC_TRIAL_RESUME === "true") {
             assert.match(sql, /JOIN installation_attestations/);
             assert.match(sql, /d\.apns_environment = 'production'/);
+            if (trial.PUBLIC_TRIAL_RELAY_CREDENTIAL_ID) {
+              assert.match(sql, /d\.verified_at IS NOT NULL/);
+              assert.equal(params[0], trial.PUBLIC_TRIAL_RELAY_CREDENTIAL_ID);
+              assert.equal(params[1], String(Date.parse(trial.PUBLIC_TRIAL_UNTIL)));
+            } else assert.equal(params, undefined);
             result = [{ success: true, results: [{ accounts: 1, trial_device: 1 }] }];
           } else {
             assert.equal(sql, "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts");
@@ -693,6 +698,23 @@ test("公開productionの再試験は既存の対象端末1台があるときに
       },
       valid,
     ),
+  );
+});
+
+test("公開productionの実X再試験は有効な資格情報と所有確認済みの端末を照合する", async () => {
+  const trial = {
+    PUBLIC_TRIAL_UNTIL: new Date(Date.now() + 30 * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    PUBLIC_TRIAL_RESUME: "true",
+    PUBLIC_TRIAL_RELAY_CREDENTIAL_ID: "11111111-1111-4111-8111-111111111111",
+  };
+  const valid = fixture({ publicProduction: true, trial });
+  assert.equal(
+    (await executeDeployment(valid.env, valid)).status,
+    "public_production_trial_deployed",
+  );
+  await assert.rejects(executeDeployment({ ...valid.env, PUBLIC_TRIAL_RESUME: "false" }, valid));
+  await assert.rejects(
+    executeDeployment({ ...valid.env, PUBLIC_TRIAL_RELAY_CREDENTIAL_ID: "invalid" }, valid),
   );
 });
 
