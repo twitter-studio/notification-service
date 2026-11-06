@@ -521,6 +521,13 @@
             "additionalProperties": false,
             "description": "メンション・返信・引用ツイート・リツイート・いいねのみ。通知を起こした公開アカウントの @ を除いたユーザー名と、公開ツイート本文の抜粋"
           },
+          "dm_preview": {
+            "type": "string",
+            "minLength": 39,
+            "maxLength": 3400,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "description": "DM 専用の暗号文。アカウントルートとイベント ID に結び付け、端末で復号する"
+          },
           "occurred_at": {
             "type": "string",
             "format": "date-time",

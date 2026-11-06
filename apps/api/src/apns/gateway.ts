@@ -7,7 +7,13 @@ import {
 } from "@notification-service/db";
 import { z } from "zod";
 import { DEVICE_VERIFICATION_TTL_MS, type DeviceVerificationSender } from "../devices/verification";
-import { EVENT_TYPES, NotificationAlert, NotificationRouteID } from "../notifications/payload";
+import {
+  DmPreviewFallbackAlert,
+  DmPreviewPayload,
+  EVENT_TYPES,
+  NotificationAlert,
+  NotificationRouteID,
+} from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
 import { recordTelemetry } from "../telemetry";
@@ -20,6 +26,7 @@ const Payload = z
     aps: z.strictObject({
       alert: NotificationAlert,
       sound: z.literal("default"),
+      "mutable-content": z.literal(1).optional(),
     }),
     event_type: z.enum([...EVENT_TYPES, "test"]),
     post_id: z
@@ -27,12 +34,18 @@ const Payload = z
       .regex(/^[1-9][0-9]{0,18}$/)
       .optional(),
     route_id: NotificationRouteID.optional(),
+    dm_preview: DmPreviewPayload.optional(),
   })
-  .refine(
-    (payload) =>
-      payload.event_type !== "dm" ||
-      (payload.route_id !== undefined && "loc-key" in payload.aps.alert),
-  );
+  .refine((payload) => {
+    const hasPreview = payload.dm_preview !== undefined;
+    if (hasPreview !== (payload.aps["mutable-content"] === 1)) return false;
+    if (payload.event_type !== "dm") return !hasPreview;
+    return (
+      payload.route_id !== undefined &&
+      "loc-key" in payload.aps.alert &&
+      (!hasPreview || DmPreviewFallbackAlert.safeParse(payload.aps.alert).success)
+    );
+  });
 const RetryJob = z.strictObject({
   accountId: z.uuid(),
   authority: z.discriminatedUnion("kind", [
