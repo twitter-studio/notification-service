@@ -61,12 +61,12 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 
 ## 公開用productionを閉じた状態で準備する
 
-対象は `notification-service-production` のWorkerとD1、`notification-apns-production` Queue。sandboxとproduction検証用の資源を再利用しない。最初のmigrationとWorkerの配置は登録・配送を閉じた状態で別々に行う。一般登録を有効にする操作は別の変更としてレビューする。
+対象は `notification-service-production` のWorkerとD1、`notification-apns-production` Queue。sandboxとproduction検証用の資源を再利用しない。最初のmigrationとWorkerの配置は登録・配送を閉じた状態で別々に行う。通常運用への切り替えは、初期配置後に別runで行う。
 
 1. オーナーの承認後、専用D1とQueueを作り、外部の入口を持たず404だけを返す[初期Worker](../apps/api/public-bootstrap/wrangler.jsonc)を用意する。初期Workerの平文変数は `PUBLIC_PRODUCTION_BOOTSTRAP=true` のみ。APNs provider鍵、チャレンジ署名鍵、端末トークンの暗号鍵束と指紋鍵を、対象Workerのsecretに置く。公開用の端末トークン鍵とチャレンジ鍵は別途生成する。APNs鍵の選定と運用対象は承認記録に残す。
-2. GitHubの `production` と `production-migrations` を本人1名のrequired reviewer、main限定、管理者bypass禁止で設定する。配置とmigrationの資格情報を分ける。必要な権限は配置先Workerだけの編集、D1参照、Queue管理と、migration先D1の編集。配置前にCloudflareのWorker情報から公開URLを照合する。個別に絞れない権限は、発行前に許可範囲を記録する。
+2. GitHubの `production` と `production-migrations` を本人1名のrequired reviewer、main限定、管理者bypass禁止で設定する。配置とmigrationの資格情報を分ける。必要な権限は配置先Workerだけの編集、D1参照、Queue管理と、migration先D1の編集。migrationの停止照合には、公開WorkerとQueueを参照できる別の読み取り専用トークンを使い、`production-migrations` Environmentの `PUBLIC_WORKER_READ_TOKEN` に保存する。トークンの発行は対象と権限を確定してから別途承認する。配置前にCloudflareのWorker情報から公開URLを照合する。個別に絞れない権限は、発行前に許可範囲を記録する。
 3. 両Environmentの変数に `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_BUNDLE_VERSION`、`PROD_DEVICE_TOKEN_KEY_CHECKS` と `VERIFICATION_DEVICE_TOKEN_KEY_CHECKS` を指定する。公開用のKCVの鍵IDは `production`。検証用KCVは検証用Environmentの実値と照合する。KCVだけを変数に保存し、鍵をコピーしない。
-4. リポジトリの `PUBLIC_PRODUCTION_DEPLOY_ENABLED` は通常false。作業中だけtrueにし、`Closed public production deployment` をmainのCI成功SHAで起動する。専用D1に初期migrationを適用した後、別runでWorkerを配置する。各runはオーナー本人がEnvironment承認を行う。
+4. リポジトリの `PUBLIC_PRODUCTION_DEPLOY_ENABLED` は通常false。作業中だけtrueにし、`Public production deployment` をmainのCI成功SHAで起動する。専用D1に初期migrationを適用した後、別runでWorkerを配置する。既存の公開環境にmigrationを当てる前には、別runで登録・配送を停止し、書き込み元とQueueの停止を照合する。Workflowも稼働中のWorkerの両スイッチがfalseで試験枠がなく、専用Queueが空であることを読み取り確認する。初期migrationでは、初期Workerとproducer・consumerのない専用Queueを照合する。各runはオーナー本人がEnvironment承認を行う。
 5. `public_production_closed_deployed`、health 200、登録403、専用のbindingとQueue空を確認する。公開用のApp Attestは `required` と `production`、招待secretは存在しない。両スイッチはfalse。完了後は配置有効化変数をfalseに戻し、migration用の資格情報を整理する。
 
 対応する配布候補と利用条件は [RELEASE-001](https://github.com/twitter-studio/notification-docs/issues/3) で確認する。
@@ -74,10 +74,23 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 ### 内部TestFlightの実機試験
 
 1. オーナーと対象ビルド、端末、終了時刻を確定する。`PROD_BUNDLE_VERSION` に配布後のビルド番号を指定する。32バイトの乱数をパディングなしBase64URLにした招待コードを保護ファイルに保存し、試験端末の操作者に渡す。
-2. `Closed public production deployment` の `deploy` を起動し、`trial_until` に2時間以内のUTC終了時刻を指定する。`trial_invite_hash` には招待コードの文字列をSHA-256でハッシュし、パディングなしBase64URLにした値を渡す。オーナーが `production` Environment を承認する。Workflowは通常の登録・配送が閉じ、D1に登録がなく、Queueが空であることを確認してから配置する。
+2. `Public production deployment` の `deploy` を `public_mode=closed` で起動し、`trial_until` に2時間以内のUTC終了時刻を指定する。`trial_invite_hash` には招待コードの文字列をSHA-256でハッシュし、パディングなしBase64URLにした値を渡す。オーナーが `production` Environment を承認する。Workflowは通常の登録・配送が閉じ、D1に登録がなく、Queueが空であることを確認してから配置する。
 3. `public_production_trial_deployed` を確認する。実機で招待コードを入力し、App Attest登録、端末所有確認、テスト通知を確認する。新規登録は1件だけ受け付ける。終了時刻を過ぎると、新規登録とAPNsへの新規送信は停止する。APNsが既に受理した通知は端末に届く場合がある。
 4. 試験が終わったらQueueが空であることを確認し、試験入力を空欄にして閉鎖配置を起動する。本人承認後、登録403、`PUBLIC_TRIAL` の解除、`PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` を確認する。
 
 前回の試験で登録が済み、所有確認やテスト通知を再試行する場合は、同じビルドと端末を使う。`trial_resume=true` と `trial_until` を指定し、`trial_invite_hash` は空欄にする。Workflowは前回の登録1件とproductionのApp Attestおよび端末登録を照合する。再試験の配送は登録済みのAPNsトークンへの所有確認とアプリ内のテスト通知に限る。中継はHTTP入口で拒否し、Queueに届いた中継の再送も破棄する。
 
 実 X のメンションと返信を確認するときは、同じ再試験入力に `trial_relay_credential_id` を加える。Workflowは指定した資格情報が登録済みのアカウントに属し、端末の所有確認が済んでいることを照合する。指定資格情報のメンションと返信だけを中継し、HTTPとQueueの両方で照合する。試験後は通常の閉鎖配置に戻し、試験で使用した中継資格情報をアプリから取り消す。
+
+### 通常運用を開始する
+
+1. オーナーと対象ビルド、登録と配送を開始する範囲、停止担当を確定する。専用Queueが空で、以前の中継イベントが再送されないことを確認する。必要に応じて旧中継資格情報を取り消し、利用者側の購読とQueueも照合する。[利用開始と停止の手順](https://github.com/twitter-studio/notification-docs/blob/main/docs/operations/public-notification-lifecycle.md)
+2. `Public production deployment` を `operation=deploy`、`public_mode=open`、`confirmation=deploy-open:完全SHA` で起動する。試験用の入力は空にし、対象buildを `PROD_BUNDLE_VERSION` と照合する。オーナー本人が `production` Environment を承認する。
+3. `public_production_open_deployed` を確認する。Workflowは配置後に登録・配送の設定が両方trueで、healthが200であることを照合する。登録入口には無効なチャレンジを送り、アプリから401が返ることを確認する。実際の登録、所有確認、配送は対象端末で別途確認する。終了後は `PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` に戻す。
+
+通常運用への配置runが失敗した場合は、稼働版と両スイッチを確認する。通常運用が反映されていて停止が必要なら、次の手順で緊急停止する。
+
+### 登録と配送を緊急停止する
+
+1. 同じWorkflowを `operation=deploy`、`public_mode=stop`、`confirmation=deploy-stop:完全SHA` で起動する。試験用の入力は空にする。Queueに待機ジョブがある状態でも、オーナーが `production` Environment を承認すると停止構成を配置できる。
+2. `public_production_stop_deployed`、登録403、登録と配送の設定が両方false、試験枠の解除を確認する。停止したWorkerが受け取る再送ジョブは破棄される。切り替え前に始まった処理や、APNsが受理済みの通知は端末へ届く場合がある。Queueの件数と利用者側の状態を確認し、配置有効化変数をfalseに戻す。

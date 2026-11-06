@@ -219,3 +219,29 @@ test("公開productionのEnvironmentは管理者bypassを明示的に禁止す�
     else await assert.rejects(run, DeploymentFailure);
   }
 });
+
+test("公開の有効化と緊急停止には対象SHAと操作名を含む確認が必要", () => {
+  const enabled = { PUBLIC_PRODUCTION_DEPLOY_ENABLED: "true" };
+  for (const mode of ["open", "stop"]) {
+    const env = environment({
+      ...enabled,
+      PUBLIC_DEPLOY_MODE: mode,
+      DEPLOY_CONFIRMATION: `deploy-${mode}:${sha}`,
+    });
+    assert.equal(deploymentRequest(env, true, false, true).environment, "production");
+    assert.throws(() => deploymentRequest(env, true), DeploymentFailure);
+    for (const invalid of [
+      { DEPLOY_CONFIRMATION: `deploy:${sha}` },
+      { DEPLOY_OPERATION: "migrate" },
+      {
+        PUBLIC_TRIAL_UNTIL: new Date(Date.now() + 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+        PUBLIC_TRIAL_RESUME: "true",
+      },
+    ]) {
+      assert.throws(
+        () => deploymentRequest({ ...env, ...invalid }, true, false, true),
+        DeploymentFailure,
+      );
+    }
+  }
+});
