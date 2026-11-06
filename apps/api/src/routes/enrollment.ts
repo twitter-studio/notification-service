@@ -9,7 +9,7 @@ import {
 } from "@notification-service/db";
 import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { enrollmentEnabled } from "../operations";
+import { enrollmentPermission } from "../operations";
 import { ProblemError } from "../problem";
 import {
   AppAttestProof,
@@ -232,8 +232,14 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
   app.openapi(enrollRoute, async (c) => {
     await enforceRateLimit(c.env.CLIENT_RATE_LIMITER, clientAddressKey(c.req.raw));
     const body = c.req.valid("json");
-    if (!(await enrollmentEnabled(c.env, body.invite_code ?? ""))) {
+    const permission = await enrollmentPermission(c.env, body.invite_code ?? "");
+    if (permission === undefined) {
       throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
+    }
+    const trialClaim = permission.kind === "trial" ? permission.claim : undefined;
+    function checkTrialDeadline() {
+      if (trialClaim !== undefined && trialClaim.expiresAt.getTime() <= Date.now())
+        throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
     }
     if (appAttestPolicy(c.env).mode !== "required")
       await checkInvite(c, body.invite_code ?? "", warnings);
@@ -279,12 +285,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
     const relaySecret = newBearerToken("relay");
     const session = await newSession(now);
     const relaySecretHash = await hashBearerToken(relaySecret);
-    if (
-      c.env.PUBLIC_TRIAL !== undefined &&
-      !(await enrollmentEnabled(c.env, body.invite_code ?? ""))
-    ) {
-      throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
-    }
+    checkTrialDeadline();
     try {
       const enrolled =
         existing?.accountId !== undefined
@@ -296,6 +297,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
                 ...(attestation.kind === "initial" ? { attestation: attestation.value } : {}),
                 relaySecretHash,
                 challenge,
+                ...(trialClaim === undefined ? {} : { trialClaim }),
                 session: session.record,
               },
               now,
@@ -319,6 +321,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
         c.env.INSTALLATION_RATE_LIMITER,
         `installation:${enrolled.installationId}`,
       );
+      checkTrialDeadline();
       const sessionId = await createSession(
         db,
         {

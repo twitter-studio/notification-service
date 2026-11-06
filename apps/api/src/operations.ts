@@ -47,15 +47,27 @@ export function publicOperationEnabled(
   );
 }
 
-export async function enrollmentEnabled(env: OperationsEnv, inviteCode: string): Promise<boolean> {
-  if (publicOperationEnabled(env, "PUBLIC_ENROLLMENT_ENABLED")) return true;
+type EnrollmentPermission =
+  | { kind: "standard" }
+  | { kind: "trial"; claim: { nonce: string; expiresAt: Date } };
+
+export async function enrollmentPermission(
+  env: OperationsEnv,
+  inviteCode: string,
+): Promise<EnrollmentPermission | undefined> {
+  if (publicOperationEnabled(env, "PUBLIC_ENROLLMENT_ENABLED")) return { kind: "standard" };
   const trial = activeTrial(env);
-  return (
+  if (
     trial !== undefined &&
     tokenShape.test(inviteCode) &&
     (await constantTimeEquals(await hashBearerToken(inviteCode), trial.inviteHash)) &&
     trial.until > Date.now()
-  );
+  ) {
+    return {
+      kind: "trial",
+      claim: { nonce: `public-trial.${trial.inviteHash}`, expiresAt: new Date(trial.until) },
+    };
+  }
 }
 
 export function requireDeliveryEnabled(env: OperationsEnv): void {

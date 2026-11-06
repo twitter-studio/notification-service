@@ -21,23 +21,14 @@ const production = {
   APP_ATTEST_POLICY: JSON.stringify({ ...policy, mode: "required", environment: "production" }),
 };
 
-it("公開実機試験は招待とApp Attestを要求し、期限後は登録と配送を閉じる", async () => {
+async function trialEnrollment() {
   const device = await newDeviceKey();
-  const key = await challengeKeyFromEnv(env);
-  const challenge = (await issueChallenge(key, "enroll")).challenge;
+  const challenge = (await issueChallenge(await challengeKeyFromEnv(env), "enroll")).challenge;
   const message = enrollmentMessage(challenge, device.publicKey);
   const attest = await fixture({
     environment: "production",
     clientData: new TextEncoder().encode(message),
   });
-  const app = createApp({ appAttestVerifier: attest.verifier });
-  const invite = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA";
-  const inviteHash = await hashBearerToken(invite);
-  const trial = {
-    ...production,
-    PUBLIC_TRIAL: JSON.stringify({ until: Date.now() + 60_000, inviteHash }),
-  };
-  const expired = { ...trial, PUBLIC_TRIAL: JSON.stringify({ until: Date.now() - 1, inviteHash }) };
   const body = {
     challenge,
     public_key: device.publicKey,
@@ -48,8 +39,22 @@ it("公開実機試験は招待とApp Attestを要求し、期限後は登録と
       data: toBase64Url(attest.input.object),
     },
   };
-  const enroll = (config: typeof trial, input: unknown) =>
-    app.request(
+  return { body, attest };
+}
+
+it("公開実機試験は招待とApp Attestを要求し、期限後は登録と配送を閉じる", async () => {
+  const { body, attest } = await trialEnrollment();
+  const app = createApp({ appAttestVerifier: attest.verifier });
+  const invite = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA";
+  const inviteHash = await hashBearerToken(invite);
+  const until = Date.now() + 60_000;
+  const trial = {
+    ...production,
+    PUBLIC_TRIAL: JSON.stringify({ until, inviteHash }),
+  };
+  const expired = { ...trial, PUBLIC_TRIAL: JSON.stringify({ until: Date.now() - 1, inviteHash }) };
+  const enroll = (config: typeof trial, input: unknown, target = app) =>
+    target.request(
       "https://notification.test/v1/enrollments",
       { method: "POST", headers: jsonHeaders(), body: JSON.stringify(input) },
       config,
@@ -59,8 +64,34 @@ it("公開実機試験は招待とApp Attestを要求し、期限後は登録と
     (await enroll(trial, { ...body, invite_code: invite, app_attest: undefined })).status,
   ).toBe(401);
   expect((await enroll(expired, { ...body, invite_code: invite })).status).toBe(403);
+  const clock = vi.spyOn(Date, "now");
+  try {
+    const crossing = createApp({
+      appAttestVerifier: {
+        ...attest.verifier,
+        async attestation(input) {
+          const proof = await attest.verifier.attestation(input);
+          clock.mockReturnValue(until);
+          return proof;
+        },
+      },
+    });
+    expect((await enroll(trial, { ...body, invite_code: invite }, crossing)).status).toBe(403);
+  } finally {
+    clock.mockRestore();
+  }
   const registered = await enroll(trial, { ...body, invite_code: invite });
   expect(registered.status).toBe(201);
+  const second = await trialEnrollment();
+  expect(
+    (
+      await enroll(
+        trial,
+        { ...second.body, invite_code: invite },
+        createApp({ appAttestVerifier: second.attest.verifier }),
+      )
+    ).status,
+  ).toBe(409);
   const owner = await registered.json<Enrolled>();
   const test = await app.request(
     "https://notification.test/v1/notifications/test",

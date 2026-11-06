@@ -75,5 +75,5 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 
 1. オーナーと対象ビルド、端末、終了時刻を確定する。`PROD_BUNDLE_VERSION` に配布後のビルド番号を指定する。32バイトの乱数をパディングなしBase64URLにした招待コードを保護ファイルに保存し、試験端末の操作者に渡す。
 2. `Closed public production deployment` の `deploy` を起動し、`trial_until` に2時間以内のUTC終了時刻を指定する。`trial_invite_hash` には招待コードの文字列をSHA-256でハッシュし、パディングなしBase64URLにした値を渡す。オーナーが `production` Environment を承認する。Workflowは通常の登録・配送が閉じ、D1に登録がなく、Queueが空であることを確認してから配置する。
-3. `public_production_trial_deployed` を確認する。実機で招待コードを入力し、App Attest登録、端末所有確認、テスト通知を確認する。終了時刻を過ぎると、新規登録とAPNsへの新規送信は停止する。APNsが既に受理した通知は端末に届く場合がある。
+3. `public_production_trial_deployed` を確認する。実機で招待コードを入力し、App Attest登録、端末所有確認、テスト通知を確認する。新規登録は1件だけ受け付ける。終了時刻を過ぎると、新規登録とAPNsへの新規送信は停止する。APNsが既に受理した通知は端末に届く場合がある。
 4. 試験が終わったらQueueが空であることを確認し、試験入力を空欄にして閉鎖配置を起動する。本人承認後、登録403、`PUBLIC_TRIAL` の解除、`PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` を確認する。
