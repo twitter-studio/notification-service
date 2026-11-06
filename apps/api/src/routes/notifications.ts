@@ -18,6 +18,7 @@ import {
   EVENT_TYPES,
   EVENT_TYPES_WITHOUT_POST,
   eventKeyOf,
+  NotificationRouteID,
   notificationPayload,
 } from "../notifications/payload";
 import type { PushGateway, PushOutcome } from "../notifications/push";
@@ -63,6 +64,9 @@ const EventSchema = z
       .regex(/^[1-9][0-9]{0,18}$/)
       .optional()
       .openapi({ description: "ツイートの ID。follow 以外では要り、follow では送らない" }),
+    route_id: NotificationRouteID.optional().openapi({
+      description: "アプリ内のアカウントを選ぶための識別子。端末への配送先は変えない",
+    }),
     occurred_at: z.iso
       .datetime()
       .openapi({ description: "イベントが起きた時刻。UTC (末尾が Z) で送る" }),
@@ -216,6 +220,7 @@ export function registerNotifications(
           eventId: body.event_id,
           type: body.type,
           postId: body.post_id,
+          routeId: body.route_id,
         }),
       };
       for (const device of devices) {

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { DeviceTokenKeys } from "../security/device-token";
 import { toBase64Url } from "../security/encoding";
 
@@ -8,11 +9,15 @@ export const EVENT_TYPES = ["mention", "reply", "quote", "retweet", "like", "fol
 
 export type EventType = (typeof EVENT_TYPES)[number];
 
+export const NotificationRouteID = z.uuid().brand<"NotificationRouteID">();
+export type NotificationRouteID = z.infer<typeof NotificationRouteID>;
+
 export type RelayEvent = {
   eventId: string;
   type: EventType;
   /** ツイートの ID (数字だけ)。アプリは、これで X の決まった画面だけを開く。 */
   postId?: string | undefined;
+  routeId?: NotificationRouteID | undefined;
 };
 
 /** ツイートを指さない種類。これらは `post_id` を受けない (ほかの種類は、`post_id` が要る)。 */
@@ -49,6 +54,7 @@ export type NotificationPayload = {
   aps: { alert: { "loc-key": "You have a new notification." }; sound: "default" };
   event_type: EventType | "test";
   post_id?: string;
+  route_id?: NotificationRouteID;
 };
 
 /**
@@ -60,5 +66,6 @@ export function notificationPayload(event: RelayEvent): NotificationPayload {
     aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
     event_type: event.type,
     ...(event.postId === undefined ? {} : { post_id: event.postId }),
+    ...(event.routeId === undefined ? {} : { route_id: event.routeId }),
   };
 }

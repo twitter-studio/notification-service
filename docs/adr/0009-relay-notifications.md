@@ -50,6 +50,7 @@ Status: Accepted / 2026-11-04
   - 結果の数だけをログに出す (トークン、端末の ID は出さない)。送れなかった端末 (読めない暗号文、`failed`、`retry_later`、時間切れ) があれば error で出し、運営が気づけるようにする (鍵の入れ替えの誤りなど)。
 - 通知の中身は、中身を運ばない一般的な文 (ADR-0001 §4) で、アプリの訳 (`loc-key`) で出す。
   - 形: `{"aps":{"alert":{"loc-key":"You have a new notification."},"sound":"default"},"event_type":"mention","post_id":"…"}`。
+  - 送信元が端末のアプリで発行した経路の UUID を `route_id` として指定できる。運営 API は通知と再送にそのまま渡す。送り先は中継の資格情報から決める。既存の送信元は引き続き `route_id` を省略できる。
   - 送り手の文、題、URL は入れない。ほかのアプリや運営を装った文を出させないため。
   - アプリは `loc-key` の訳を持ち、`post_id` を確かめてから、X の決まった画面だけを開く (IOS-001)。iOS は `loc-key` をアプリ本体の bundle から引くので、訳はアプリのターゲットに置く (Tweetbot の画面の訳がある TweetbotUI パッケージではない)。
 

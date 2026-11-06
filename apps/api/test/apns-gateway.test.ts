@@ -11,7 +11,7 @@ import {
 } from "@notification-service/db";
 import { describe, expect, it, vi } from "vitest";
 import { ApnsPushGateway, retryDelay } from "../src/apns/gateway";
-import { notificationPayload } from "../src/notifications/payload";
+import { NotificationRouteID, notificationPayload } from "../src/notifications/payload";
 import type { PushTarget } from "../src/notifications/push";
 import { loadDeviceTokenKeys, sealDeviceToken } from "../src/security/device-token";
 import { consumedChallenge, newAccount, TOPIC, verifyDevice } from "./db/helpers";
@@ -54,10 +54,10 @@ async function accountWithDevice() {
   };
 }
 
-function notification() {
+function notification(routeId?: NotificationRouteID) {
   return {
     eventKey: "a".repeat(43),
-    payload: notificationPayload({ eventId: "test", type: "follow" }),
+    payload: notificationPayload({ eventId: "test", type: "follow", routeId }),
   };
 }
 
@@ -236,11 +236,13 @@ describe("APNs の遅延再送", () => {
     },
   );
 
-  it("一時障害だけ Queue に渡し、平文トークンや署名鍵を残さず、同じ ID で再送する", async () => {
+  it("一時障害だけ Queue に渡し、平文トークンや署名鍵を残さず、同じ ID とアプリ内の経路で再送する", async () => {
     const account = await accountWithDevice();
     const test = await setup();
+    const routeId = NotificationRouteID.parse(crypto.randomUUID());
+    const outgoing = notification(routeId);
     expect(
-      await test.gateway.push(account.target, notification(), {
+      await test.gateway.push(account.target, outgoing, {
         signal: new AbortController().signal,
       }),
     ).toEqual({ kind: "queued" });
@@ -257,9 +259,10 @@ describe("APNs の遅延再送", () => {
     expect(new Headers(test.requests[0]?.headers).get("apns-id")).toBe(
       new Headers(test.requests[1]?.headers).get("apns-id"),
     );
-    expect(new Headers(test.requests[1]?.headers).get("apns-collapse-id")).toBe(
-      notification().eventKey,
-    );
+    expect(new Headers(test.requests[1]?.headers).get("apns-collapse-id")).toBe(outgoing.eventKey);
+    for (const request of test.requests) {
+      expect(await new Response(request.body).json()).toMatchObject({ route_id: routeId });
+    }
   });
 
   it("5xx の2回目も15分以上待ち、初回を含む3回の送信で打ち切る", async () => {
