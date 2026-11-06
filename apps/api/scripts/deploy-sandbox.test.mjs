@@ -192,7 +192,7 @@ function fixture({
           }
         } else if (u.pathname.includes("/d1/database/"))
           result = { uuid: env.D1_DATABASE_ID, name: config.d1_databases[0].database_name };
-        else if (u.pathname.endsWith("/settings")) {
+        else if (u.pathname.endsWith("/settings") || u.pathname.includes("/versions/")) {
           result = structuredClone(snapshot);
           if (mutations === 0)
             result.bindings = result.bindings.filter((binding) => binding.name !== "PUBLIC_TRIAL");
@@ -232,6 +232,8 @@ function fixture({
           };
         }
         mutate(u, result);
+        if (u.pathname.includes("/versions/"))
+          result = { id: u.pathname.split("/").at(-1), resources: result };
         return Response.json({ success: true, result });
       }
       assert.equal(options.headers?.Authorization, undefined);
@@ -784,19 +786,21 @@ test("公開productionのmigrationには別Environmentを使い、公開Worker�
   assert.ok(f.calls.some((url) => url.endsWith("/environments/production-migrations")));
   assert.ok(
     f.calls.some((url) =>
-      url.endsWith("/workers/scripts/notification-service-production/settings"),
+      url.includes("/workers/scripts/notification-service-production/versions/"),
     ),
   );
   assert.equal(f.count(), 1);
 });
 
 test("公開productionのmigrationは現行Workerの停止と空のQueueを要求する", async () => {
-  for (const condition of ["open", "trial", "backlog", "missing-token"]) {
+  for (const condition of ["open", "trial", "backlog", "split", "missing-token"]) {
     const f = fixture({
       publicProduction: true,
       migrate: true,
       mutate(url, result) {
-        if (url.pathname.endsWith("/settings")) {
+        if (condition === "split" && url.pathname.endsWith("/deployments"))
+          result.deployments[0].versions[0].percentage = 50;
+        if (url.pathname.includes("/versions/")) {
           if (condition === "open")
             result.bindings.find(({ name }) => name === "PUBLIC_DELIVERY_ENABLED").text = "true";
           if (condition === "trial")
@@ -836,7 +840,7 @@ test("本番の有効化は閉鎖済みのWorkerで両方のスイッチを開�
     publicProduction: true,
     mode: "open",
     mutate(url, result) {
-      if (!url.pathname.endsWith("/settings") || f.count() !== 0) return;
+      if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
       for (const binding of result.bindings) {
         if (["PUBLIC_ENROLLMENT_ENABLED", "PUBLIC_DELIVERY_ENABLED"].includes(binding.name))
           binding.text = "false";
@@ -857,7 +861,7 @@ test("本番を開く操作は初期Worker、稼働中の試験枠、待機中�
       mode: "open",
       bootstrap: condition === "bootstrap",
       mutate(url, result) {
-        if (condition === "trial" && url.pathname.endsWith("/settings"))
+        if (condition === "trial" && url.pathname.includes("/versions/"))
           result.bindings.push({ name: "PUBLIC_TRIAL", type: "plain_text", text: "{}" });
         if (condition === "backlog" && url.pathname.endsWith("/metrics")) result.backlog_count = 1;
       },

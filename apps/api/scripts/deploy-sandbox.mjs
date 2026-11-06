@@ -279,6 +279,16 @@ export function checkSnapshot(
   )
     throw new DeploymentFailure();
 }
+function singleActiveVersion(deployments) {
+  const active = deployments.deployments?.[0]?.versions;
+  if (
+    active?.length !== 1 ||
+    active[0].percentage !== 100 ||
+    !z.uuid().safeParse(active[0].version_id).success
+  )
+    throw new DeploymentFailure();
+  return active[0].version_id;
+}
 function checkPublicQueue(details, config, id, bootstrap) {
   const count = bootstrap ? 0 : 1;
   const { producers = [], consumers = [] } = details;
@@ -378,13 +388,21 @@ export async function executeDeployment(
   )
     throw new DeploymentFailure();
   const stateApi = (path) => api(path, { token: stateToken });
+  async function versionSettings(version) {
+    const details = await stateApi(`${worker}/versions/${version}`);
+    if (details.id !== version || !details.resources) throw new DeploymentFailure();
+    return details.resources;
+  }
   if (!migration || publicProduction) {
     if (publicProduction) {
       const workerRecord = await stateApi(`workers/workers/${config.name}`);
       if (workerRecord?.name !== config.name || workerRecord.subdomain?.url !== origin)
         throw new DeploymentFailure();
     }
-    const settings = await stateApi(`${worker}/settings`);
+    const settings =
+      publicProduction && (migration || publicMode === "open")
+        ? await versionSettings(singleActiveVersion(await stateApi(`${worker}/deployments`)))
+        : await stateApi(`${worker}/settings`);
     const bootstrap =
       (productionVerification || publicProduction) &&
       settings.bindings?.some(
@@ -490,9 +508,9 @@ export async function executeDeployment(
     if (!version) throw new DeploymentFailure();
     checkSnapshot(await api(`${worker}/settings`), config, { publicProduction });
     const deployments = await api(`${worker}/deployments`);
-    const active = deployments.deployments?.[0]?.versions;
-    if (active?.length !== 1 || active[0].version_id !== version || active[0].percentage !== 100)
-      throw new DeploymentFailure();
+    if (singleActiveVersion(deployments) !== version) throw new DeploymentFailure();
+    if (publicProduction)
+      checkSnapshot(await versionSettings(version), config, { publicProduction });
     if (publicProduction) checkPublicQueue(await api(queue), config, input.CF_QUEUE_ID, false);
     if (publicMode !== "stop" && publicMode !== "open") {
       const metrics = await api(`${queue}/metrics`);
