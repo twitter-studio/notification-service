@@ -114,13 +114,16 @@ describe("中継の受け付け", () => {
     });
   });
 
-  it("ほかのアカウントの端末へは送らない", async () => {
+  it("アプリ内の経路を通知へ渡すが、その識別子が指す別のアカウントの端末へは送らない", async () => {
     const { app, sent } = appWithPush();
     const alice = await accountWithDevice();
     const bob = await accountWithDevice();
 
-    await relay(app, alice.enrolled.relay_secret, newEvent());
+    const routeId = bob.enrolled.account_id;
+    const response = await relay(app, alice.enrolled.relay_secret, newEvent({ route_id: routeId }));
 
+    expect(response.status).toBe(202);
+    expect(sent[0]?.notification.payload.route_id).toBe(routeId);
     expect(sent.map((item) => item.target.deviceId)).toEqual([alice.deviceId]);
     expect(sent.map((item) => item.target.deviceId)).not.toContain(bob.deviceId);
   });
@@ -198,6 +201,7 @@ describe("中継の受け付け", () => {
 
     for (const extra of [
       { account_id: crypto.randomUUID() },
+      { route_id: "12345" },
       { x_user_id: "12345" },
       { apns_token: newApnsToken() },
       { title: "Hello" },

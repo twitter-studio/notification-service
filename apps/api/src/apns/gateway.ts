@@ -7,7 +7,7 @@ import {
 } from "@notification-service/db";
 import { z } from "zod";
 import { DEVICE_VERIFICATION_TTL_MS, type DeviceVerificationSender } from "../devices/verification";
-import { EVENT_TYPES } from "../notifications/payload";
+import { EVENT_TYPES, NotificationRouteID } from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
 import { recordTelemetry } from "../telemetry";
@@ -25,6 +25,7 @@ const Payload = z.strictObject({
     .string()
     .regex(/^[1-9][0-9]{0,18}$/)
     .optional(),
+  route_id: NotificationRouteID.optional(),
 });
 const RetryJob = z.strictObject({
   accountId: z.uuid(),
