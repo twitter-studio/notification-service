@@ -4,7 +4,12 @@ import { unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { experimental_readRawConfig } from "wrangler";
 import { z } from "zod";
-import { checkDeploymentGate, DeploymentFailure, publicTrial } from "./deployment-gate.mjs";
+import {
+  checkDeploymentGate,
+  DeploymentFailure,
+  publicDeploymentMode,
+  publicTrial,
+} from "./deployment-gate.mjs";
 
 const KIND = "service";
 const verificationWorker = "notification-service-prod-verification";
@@ -12,6 +17,7 @@ const verificationQueue = "notification-apns-prod-verification";
 const publicWorker = "notification-service-production";
 const publicQueue = "notification-apns-production";
 const publicBootstrap = "PUBLIC_PRODUCTION_BOOTSTRAP";
+const publicSwitches = ["PUBLIC_ENROLLMENT_ENABLED", "PUBLIC_DELIVERY_ENABLED"];
 const directory = resolve(import.meta.dirname, "..");
 const name = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
 const Inputs = z.object({
@@ -118,8 +124,8 @@ export function deploymentConfig(
         bundleVersions: [bundleVersion],
       });
       if (publicProduction) {
-        config.vars.PUBLIC_ENROLLMENT_ENABLED = "false";
-        config.vars.PUBLIC_DELIVERY_ENABLED = "false";
+        const enabled = String(publicDeploymentMode(env) === "open");
+        for (const key of publicSwitches) config.vars[key] = enabled;
         const trial = publicTrial(env);
         if (trial) config.vars.PUBLIC_TRIAL = JSON.stringify(trial);
       }
@@ -193,7 +199,11 @@ export function checkSnapshot(
       (binding) =>
         binding.type === "plain_text" &&
         !Object.hasOwn(config.vars, binding.name) &&
-        !(publicPreflight && binding.name === "PUBLIC_TRIAL"),
+        !(
+          publicPreflight &&
+          config.vars.PUBLIC_ENROLLMENT_ENABLED === "false" &&
+          binding.name === "PUBLIC_TRIAL"
+        ),
     )
   )
     throw new DeploymentFailure();
@@ -229,6 +239,9 @@ export function checkSnapshot(
         appId: z.literal(policy.appId),
         bundleVersions: z.tuple([z.string().regex(/^[1-9][0-9]{0,8}$/)]),
       }).parse(JSON.parse(current.text));
+    } else if (publicProduction && publicPreflight && publicSwitches.includes(key)) {
+      z.enum(["true", "false"]).parse(current.text);
+      if (config.vars.PUBLIC_TRIAL && current.text !== "false") throw new DeploymentFailure();
     } else if (before && key === "APP_ATTEST_POLICY") {
       const schema = z.strictObject({
         mode: z.literal("invite_only"),
@@ -265,6 +278,16 @@ export function checkSnapshot(
     )
   )
     throw new DeploymentFailure();
+}
+function singleActiveVersion(deployments) {
+  const active = deployments.deployments?.[0]?.versions;
+  if (
+    active?.length !== 1 ||
+    active[0].percentage !== 100 ||
+    !z.uuid().safeParse(active[0].version_id).success
+  )
+    throw new DeploymentFailure();
+  return active[0].version_id;
 }
 function checkPublicQueue(details, config, id, bootstrap) {
   const count = bootstrap ? 0 : 1;
@@ -306,6 +329,7 @@ export async function executeDeployment(
     productionVerification,
     publicProduction,
   });
+  const publicMode = publicProduction ? publicDeploymentMode(env) : "closed";
   if (!env.CLOUDFLARE_API_TOKEN || /[\r\n]/.test(env.CLOUDFLARE_API_TOKEN))
     throw new DeploymentFailure();
   const source = runCommand("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" });
@@ -327,12 +351,12 @@ export async function executeDeployment(
     });
     return result;
   }
-  async function api(path, sql, params) {
+  async function api(path, { sql, params, token = env.CLOUDFLARE_API_TOKEN } = {}) {
     const result = await response(
       `https://api.cloudflare.com/client/v4/accounts/${input.CLOUDFLARE_ACCOUNT_ID}/${path}`,
       {
         headers: {
-          Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           ...(sql === undefined ? {} : { "Content-Type": "application/json" }),
         },
         ...(sql === undefined ? {} : { method: "POST", body: JSON.stringify({ sql, params }) }),
@@ -355,13 +379,30 @@ export async function executeDeployment(
     if (db.uuid !== input.D1_DATABASE_ID || db.name !== config.d1_databases[0].database_name)
       throw new DeploymentFailure();
   }
-  if (request.operation === "deploy") {
+  const migration = request.operation === "migrate";
+  const stateToken = publicProduction && migration ? env.PUBLIC_WORKER_READ_TOKEN : undefined;
+  if (
+    publicProduction &&
+    migration &&
+    (!stateToken || /[\r\n]/.test(stateToken) || stateToken === env.CLOUDFLARE_API_TOKEN)
+  )
+    throw new DeploymentFailure();
+  const stateApi = (path) => api(path, { token: stateToken });
+  async function versionSettings(version) {
+    const details = await stateApi(`${worker}/versions/${version}`);
+    if (details.id !== version || !details.resources) throw new DeploymentFailure();
+    return details.resources;
+  }
+  if (!migration || publicProduction) {
     if (publicProduction) {
-      const workerRecord = await api(`workers/workers/${config.name}`);
+      const workerRecord = await stateApi(`workers/workers/${config.name}`);
       if (workerRecord?.name !== config.name || workerRecord.subdomain?.url !== origin)
         throw new DeploymentFailure();
     }
-    const settings = await api(`${worker}/settings`);
+    const settings =
+      publicProduction && (migration || publicMode === "open")
+        ? await versionSettings(singleActiveVersion(await stateApi(`${worker}/deployments`)))
+        : await stateApi(`${worker}/settings`);
     const bootstrap =
       (productionVerification || publicProduction) &&
       settings.bindings?.some(
@@ -372,26 +413,35 @@ export async function executeDeployment(
           binding.text === "true",
       );
     if (bootstrap) {
-      if (config.vars.PUBLIC_TRIAL) throw new DeploymentFailure();
+      if (config.vars.PUBLIC_TRIAL || publicMode !== "closed") throw new DeploymentFailure();
       if (settings.bindings.length !== expectedSecrets(publicProduction).length + 1)
         throw new DeploymentFailure();
       checkSecrets(settings.bindings, publicProduction);
     } else {
+      if (
+        migration &&
+        (settings.bindings.some((binding) => binding.name === "PUBLIC_TRIAL") ||
+          !publicSwitches.every((key) =>
+            settings.bindings.some(
+              (binding) =>
+                binding.name === key && binding.type === "plain_text" && binding.text === "false",
+            ),
+          ))
+      )
+        throw new DeploymentFailure();
       checkSnapshot(settings, config, {
         before: !productionVerification && !publicProduction,
         publicProduction,
         publicPreflight: publicProduction,
       });
     }
-    const details = await api(queue);
+    const details = await stateApi(queue);
     if (publicProduction) checkPublicQueue(details, config, input.CF_QUEUE_ID, bootstrap);
-    const metrics = await api(`${queue}/metrics`);
-    if (
-      details.queue_name !== config.queues.producers[0].queue ||
-      metrics.backlog_count !== 0 ||
-      metrics.backlog_bytes !== 0
-    )
-      throw new DeploymentFailure();
+    if (details.queue_name !== config.queues.producers[0].queue) throw new DeploymentFailure();
+    if (publicMode !== "stop") {
+      const metrics = await stateApi(`${queue}/metrics`);
+      if (metrics.backlog_count !== 0 || metrics.backlog_bytes !== 0) throw new DeploymentFailure();
+    }
     const trial = publicProduction ? publicTrial(env) : undefined;
     if (trial) {
       const resume = trial.resume === true;
@@ -405,11 +455,10 @@ export async function executeDeployment(
                 AND d.state = 'active' AND d.apns_environment = 'production'
                 ${trial.relayId ? "AND d.verified_at IS NOT NULL AND EXISTS(SELECT 1 FROM relay_credentials r WHERE r.account_id = a.id AND r.id = ?1 AND r.revoked_at IS NULL AND (r.expires_at IS NULL OR r.expires_at >= ?2))" : ""}) AS trial_device`
         : "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts";
-      const result = await api(
-        `d1/database/${input.D1_DATABASE_ID}/query`,
+      const result = await api(`d1/database/${input.D1_DATABASE_ID}/query`, {
         sql,
-        trial.relayId ? [trial.relayId, String(trial.until)] : undefined,
-      );
+        params: trial.relayId ? [trial.relayId, String(trial.until)] : undefined,
+      });
       const row = resume
         ? z.object({ accounts: z.literal(1), trial_device: z.literal(1) })
         : z.object({ has_accounts: z.literal(0) });
@@ -436,7 +485,13 @@ export async function executeDeployment(
         : ["exec", "wrangler", "deploy", "--config", path];
     // WranglerはvarsやAPIエラー本文を表示するため、ログへそのまま転送しない。
     const runtimeEnv = { ...env, CI: "true", NO_COLOR: "1", WRANGLER_SEND_METRICS: "false" };
-    for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "CLOUDFLARE_API_KEY", "CLOUDFLARE_EMAIL"])
+    for (const key of [
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "CLOUDFLARE_API_KEY",
+      "CLOUDFLARE_EMAIL",
+      "PUBLIC_WORKER_READ_TOKEN",
+    ])
       delete runtimeEnv[key];
     const result = runCommand("pnpm", args, {
       cwd: directory,
@@ -453,12 +508,14 @@ export async function executeDeployment(
     if (!version) throw new DeploymentFailure();
     checkSnapshot(await api(`${worker}/settings`), config, { publicProduction });
     const deployments = await api(`${worker}/deployments`);
-    const active = deployments.deployments?.[0]?.versions;
-    if (active?.length !== 1 || active[0].version_id !== version || active[0].percentage !== 100)
-      throw new DeploymentFailure();
+    if (singleActiveVersion(deployments) !== version) throw new DeploymentFailure();
+    if (publicProduction)
+      checkSnapshot(await versionSettings(version), config, { publicProduction });
     if (publicProduction) checkPublicQueue(await api(queue), config, input.CF_QUEUE_ID, false);
-    const metrics = await api(`${queue}/metrics`);
-    if (metrics.backlog_count !== 0 || metrics.backlog_bytes !== 0) throw new DeploymentFailure();
+    if (publicMode !== "stop" && publicMode !== "open") {
+      const metrics = await api(`${queue}/metrics`);
+      if (metrics.backlog_count !== 0 || metrics.backlog_bytes !== 0) throw new DeploymentFailure();
+    }
     const schedules = await api(`${worker}/schedules`);
     if (
       !config.triggers.crons.every((cron) =>
@@ -479,7 +536,7 @@ export async function executeDeployment(
       checks.push([
         "/v1/enrollments",
         "POST",
-        403,
+        publicMode === "open" ? 401 : 403,
         { challenge: "", public_key: "", signature: "" },
       ]);
     for (const [path, method, status, body] of checks) {
@@ -508,8 +565,11 @@ export async function executeDeployment(
         if (raw.length > 4096) throw new DeploymentFailure();
         const problem = JSON.parse(raw);
         if (
-          problem.status !== 403 ||
-          problem.detail !== "Enrollment is not available." ||
+          problem.status !== status ||
+          problem.detail !==
+            (publicMode === "open"
+              ? "The challenge is invalid."
+              : "Enrollment is not available.") ||
           !z.uuid().safeParse(problem.request_id).success ||
           problem.request_id !== result.headers.get("X-Request-Id")
         )
@@ -520,7 +580,7 @@ export async function executeDeployment(
       status: publicProduction
         ? config.vars.PUBLIC_TRIAL
           ? "public_production_trial_deployed"
-          : "public_production_closed_deployed"
+          : `public_production_${publicMode}_deployed`
         : productionVerification
           ? "production_verification_deployed"
           : "sandbox_deployed",

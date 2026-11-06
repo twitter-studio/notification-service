@@ -64,9 +64,14 @@ function fixture({
   bootstrap = false,
   edgeForbidden = false,
   trial = {},
+  mode,
 } = {}) {
   const targetEnv = publicProduction
-    ? { ...publicEnv, ...trial }
+    ? {
+        ...publicEnv,
+        ...trial,
+        ...(mode ? { PUBLIC_DEPLOY_MODE: mode, DEPLOY_CONFIRMATION: `deploy-${mode}:${sha}` } : {}),
+      }
     : productionVerification
       ? productionEnv
       : env;
@@ -82,6 +87,7 @@ function fixture({
         DEPLOY_OPERATION: "migrate",
         DEPLOY_CONFIRMATION: `migrate:${sha}`,
         BACKUP_CONFIRMED: "true",
+        ...(publicProduction ? { PUBLIC_WORKER_READ_TOKEN: "synthetic-read-only" } : {}),
         SCHEMA_CONFIRMED: "false",
       }
     : targetEnv;
@@ -161,7 +167,12 @@ function fixture({
         });
       }
       if (u.hostname === "api.cloudflare.com") {
-        assert.equal(options.headers.Authorization, "Bearer synthetic-cloudflare-secret");
+        const stateRead = publicProduction && migrate && !u.pathname.includes("/d1/database/");
+        assert.equal(
+          options.headers.Authorization,
+          stateRead ? "Bearer synthetic-read-only" : "Bearer synthetic-cloudflare-secret",
+        );
+        if (stateRead) assert.equal(options.method, undefined);
         let result;
         if (u.pathname.endsWith("/query")) {
           assert.equal(options.method, "POST");
@@ -181,7 +192,7 @@ function fixture({
           }
         } else if (u.pathname.includes("/d1/database/"))
           result = { uuid: env.D1_DATABASE_ID, name: config.d1_databases[0].database_name };
-        else if (u.pathname.endsWith("/settings")) {
+        else if (u.pathname.endsWith("/settings") || u.pathname.includes("/versions/")) {
           result = structuredClone(snapshot);
           if (mutations === 0)
             result.bindings = result.bindings.filter((binding) => binding.name !== "PUBLIC_TRIAL");
@@ -221,6 +232,8 @@ function fixture({
           };
         }
         mutate(u, result);
+        if (u.pathname.includes("/versions/"))
+          result = { id: u.pathname.split("/").at(-1), resources: result };
         return Response.json({ success: true, result });
       }
       assert.equal(options.headers?.Authorization, undefined);
@@ -233,10 +246,15 @@ function fixture({
           signature: "",
         });
         if (edgeForbidden) return new Response("Forbidden", { status: 403 });
+        const status = mode === "open" ? 401 : 403;
         return Response.json(
-          { status: 403, detail: "Enrollment is not available.", request_id: version },
           {
-            status: 403,
+            status,
+            detail: mode === "open" ? "The challenge is invalid." : "Enrollment is not available.",
+            request_id: version,
+          },
+          {
+            status,
             headers: { "Content-Type": "application/problem+json", "X-Request-Id": version },
           },
         );
@@ -252,11 +270,13 @@ function fixture({
       mutations++;
       const written = JSON.parse(readFileSync(args.at(-1), "utf8"));
       assert.equal(written.preview_urls, false);
+      if (publicProduction) assert.deepEqual(written.vars, config.vars);
       assert.equal(written.name, targetEnv.WORKER_NAME);
       assert.equal(written.d1_databases[0].database_name, config.d1_databases[0].database_name);
       assert.equal(JSON.stringify(written).includes("secret"), false);
       assert.equal(options.env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_ACCOUNT_ID);
       assert.equal(options.env.GH_TOKEN, undefined);
+      assert.equal(options.env.PUBLIC_WORKER_READ_TOKEN, undefined);
       if (migrate) assert.ok(args.includes("migrations") && args.includes("--remote"));
       return { status: 0, stdout: `Current Version ID: ${version}\nprivate value never printed` };
     },
@@ -764,7 +784,35 @@ test("公開productionのmigrationには別Environmentを使い、公開Worker�
   const f = fixture({ publicProduction: true, migrate: true });
   assert.equal((await executeDeployment(f.env, f)).status, "migration_applied");
   assert.ok(f.calls.some((url) => url.endsWith("/environments/production-migrations")));
-  assert.ok(f.calls.every((url) => !url.includes("/workers/scripts/")));
+  assert.ok(
+    f.calls.some((url) =>
+      url.includes("/workers/scripts/notification-service-production/versions/"),
+    ),
+  );
+  assert.equal(f.count(), 1);
+});
+
+test("公開productionのmigrationは現行Workerの停止と空のQueueを要求する", async () => {
+  for (const condition of ["open", "trial", "backlog", "split", "missing-token"]) {
+    const f = fixture({
+      publicProduction: true,
+      migrate: true,
+      mutate(url, result) {
+        if (condition === "split" && url.pathname.endsWith("/deployments"))
+          result.deployments[0].versions[0].percentage = 50;
+        if (url.pathname.includes("/versions/")) {
+          if (condition === "open")
+            result.bindings.find(({ name }) => name === "PUBLIC_DELIVERY_ENABLED").text = "true";
+          if (condition === "trial")
+            result.bindings.push({ name: "PUBLIC_TRIAL", type: "plain_text", text: "{}" });
+        }
+        if (condition === "backlog" && url.pathname.endsWith("/metrics")) result.backlog_count = 1;
+      },
+    });
+    if (condition === "missing-token") delete f.env.PUBLIC_WORKER_READ_TOKEN;
+    await assert.rejects(executeDeployment(f.env, f));
+    assert.equal(f.count(), 0);
+  }
 });
 
 test("Cloudflare側の403をアプリの登録停止の確認に使わない", async () => {
@@ -780,6 +828,76 @@ test("公開productionの配置後は専用Worker以外のconsumerを成功扱�
     mutate(url, result) {
       if (url.pathname.endsWith(`/queues/${publicEnv.CF_QUEUE_ID}`) && f.count() === 1) {
         result.consumers[0].script = "other-worker";
+      }
+    },
+  });
+  await assert.rejects(executeDeployment(f.env, f));
+  assert.equal(f.count(), 1);
+});
+
+test("本番の有効化は閉鎖済みのWorkerで両方のスイッチを開き、登録の認証を確認する", async () => {
+  const f = fixture({
+    publicProduction: true,
+    mode: "open",
+    mutate(url, result) {
+      if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
+      for (const binding of result.bindings) {
+        if (["PUBLIC_ENROLLMENT_ENABLED", "PUBLIC_DELIVERY_ENABLED"].includes(binding.name))
+          binding.text = "false";
+      }
+    },
+  });
+  const { config } = deploymentConfig(f.env, f);
+  assert.equal(config.vars.PUBLIC_ENROLLMENT_ENABLED, "true");
+  assert.equal(config.vars.PUBLIC_DELIVERY_ENABLED, "true");
+  assert.equal((await executeDeployment(f.env, f)).status, "public_production_open_deployed");
+  assert.equal(f.calls.filter((url) => url.endsWith("/metrics")).length, 1);
+});
+
+test("本番を開く操作は初期Worker、稼働中の試験枠、待機中のQueueを拒否する", async () => {
+  for (const condition of ["bootstrap", "trial", "backlog"]) {
+    const f = fixture({
+      publicProduction: true,
+      mode: "open",
+      bootstrap: condition === "bootstrap",
+      mutate(url, result) {
+        if (condition === "trial" && url.pathname.includes("/versions/"))
+          result.bindings.push({ name: "PUBLIC_TRIAL", type: "plain_text", text: "{}" });
+        if (condition === "backlog" && url.pathname.endsWith("/metrics")) result.backlog_count = 1;
+      },
+    });
+    await assert.rejects(executeDeployment(f.env, f));
+    assert.equal(f.count(), 0);
+  }
+});
+
+test("本番の緊急停止はQueueの待機を妨げにせず、両方のスイッチを閉じる", async () => {
+  const f = fixture({
+    publicProduction: true,
+    mode: "stop",
+    mutate(url, result) {
+      if (url.pathname.endsWith("/metrics"))
+        throw new Error("Stop must not depend on queue metrics");
+      if (!url.pathname.endsWith("/settings") || f.count() !== 0) return;
+      for (const binding of result.bindings) {
+        if (["PUBLIC_ENROLLMENT_ENABLED", "PUBLIC_DELIVERY_ENABLED"].includes(binding.name))
+          binding.text = "true";
+      }
+    },
+  });
+  const { config } = deploymentConfig(f.env, f);
+  assert.equal(config.vars.PUBLIC_ENROLLMENT_ENABLED, "false");
+  assert.equal(config.vars.PUBLIC_DELIVERY_ENABLED, "false");
+  assert.equal((await executeDeployment(f.env, f)).status, "public_production_stop_deployed");
+});
+
+test("公開の配置後にsettingsが一致しても、稼働版の配送設定が違えば成功としない", async () => {
+  const f = fixture({
+    publicProduction: true,
+    mode: "open",
+    mutate(url, result) {
+      if (url.pathname.includes("/versions/") && f.count() === 1) {
+        result.bindings.find(({ name }) => name === "PUBLIC_DELIVERY_ENABLED").text = "false";
       }
     },
   });

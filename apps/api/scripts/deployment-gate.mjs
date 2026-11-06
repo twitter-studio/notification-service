@@ -23,12 +23,23 @@ export function publicTrial(env) {
   return resume ? { until, resume, ...(relayId ? { relayId } : {}) } : { until, inviteHash };
 }
 
+export function publicDeploymentMode(env) {
+  const mode = env.PUBLIC_DEPLOY_MODE ?? "closed";
+  if (
+    !["closed", "open", "stop"].includes(mode) ||
+    (mode !== "closed" && (env.DEPLOY_OPERATION !== "deploy" || publicTrial(env)))
+  )
+    throw new DeploymentFailure();
+  return mode;
+}
+
 export function deploymentRequest(
   env,
   allowMigration = false,
   productionVerification = false,
   publicProduction = false,
 ) {
+  const publicMode = publicProduction ? publicDeploymentMode(env) : "closed";
   if (publicProduction) publicTrial(env);
   const operation = env.DEPLOY_OPERATION;
   if (productionVerification && publicProduction) throw new DeploymentFailure();
@@ -42,6 +53,7 @@ export function deploymentRequest(
     : productionVerification
       ? "production-verification"
       : "sandbox";
+  const confirmation = publicMode === "closed" ? operation : `deploy-${publicMode}`;
   if (
     env.GITHUB_ACTIONS !== "true" ||
     env.GITHUB_RUN_ATTEMPT !== "1" ||
@@ -54,7 +66,7 @@ export function deploymentRequest(
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY ?? "") ||
     !/^[A-Za-z0-9-]{1,39}$/.test(env.DEPLOY_REVIEWER ?? "") ||
     !["deploy", ...(allowMigration ? ["migrate"] : [])].includes(operation) ||
-    env.DEPLOY_CONFIRMATION !== `${operation}:${env.GITHUB_SHA}` ||
+    env.DEPLOY_CONFIRMATION !== `${confirmation}:${env.GITHUB_SHA}` ||
     env.MAINTENANCE_CONFIRMED !== "true" ||
     (operation === "migrate" ? env.BACKUP_CONFIRMED !== "true" : env.SCHEMA_CONFIRMED !== "true")
   )
