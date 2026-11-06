@@ -64,9 +64,9 @@ const EventSchema = z
       .string()
       .regex(/^[1-9][0-9]{0,18}$/)
       .optional()
-      .openapi({ description: "ツイートの ID。follow 以外では要り、follow では送らない" }),
+      .openapi({ description: "ツイートの ID。follow と dm には指定しない" }),
     route_id: NotificationRouteID.optional().openapi({
-      description: "アプリ内のアカウントを選ぶための識別子。端末への配送先は変えない",
+      description: "アプリ内のアカウントを選ぶための識別子。DM では必須。端末への配送先は変えない",
     }),
     preview: NotificationPreview.optional().openapi({
       description: "メンションと返信のみ。投稿者の @ を除いたユーザー名と本文の抜粋",
@@ -137,6 +137,8 @@ export function registerNotifications(
       throw new ProblemError(422, "Unprocessable Content", "The post ID does not match the type.");
     if (body.preview !== undefined && body.type !== "mention" && body.type !== "reply")
       throw new ProblemError(422, "Unprocessable Content", "The preview does not match the type.");
+    if (body.type === "dm" && body.route_id === undefined)
+      throw new ProblemError(422, "Unprocessable Content", "A DM requires an account route.");
     const now = new Date();
     const occurredAt = Date.parse(body.occurred_at);
     if (

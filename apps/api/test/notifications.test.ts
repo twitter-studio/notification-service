@@ -150,6 +150,28 @@ describe("中継の受け付け", () => {
     });
   });
 
+  it("DM はアカウント経路があるときに定型の通知を送り、本文とツイートIDを受け付けない", async () => {
+    const { app, sent } = appWithPush();
+    const recipient = await accountWithDevice();
+    const secret = recipient.enrolled.relay_secret;
+    const route_id = crypto.randomUUID();
+    const { post_id, ...withoutPost } = newEvent({ type: "dm" });
+    for (const invalid of [
+      withoutPost,
+      { ...withoutPost, route_id, post_id },
+      { ...withoutPost, route_id, dm_excerpt: "private" },
+    ])
+      expect((await relay(app, secret, invalid)).status).toBe(422);
+    expect((await relay(app, secret, { ...withoutPost, route_id })).status).toBe(202);
+    expect(sent.map(({ notification }) => notification.payload)).toEqual([
+      {
+        aps: { alert: { "loc-key": "You have a new direct message." }, sound: "default" },
+        event_type: "dm",
+        route_id,
+      },
+    ]);
+  });
+
   it("アプリ内の経路を通知へ渡すが、その識別子が指す別のアカウントの端末へは送らない", async () => {
     const { app, sent } = appWithPush();
     const alice = await accountWithDevice();

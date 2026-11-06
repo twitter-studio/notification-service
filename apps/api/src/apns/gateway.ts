@@ -15,18 +15,24 @@ import { ApnsClient, type ApnsResult } from "./client";
 
 const RETENTION_MS = 60 * 60 * 1000;
 const MAX_QUEUE_ATTEMPTS = 2;
-const Payload = z.strictObject({
-  aps: z.strictObject({
-    alert: NotificationAlert,
-    sound: z.literal("default"),
-  }),
-  event_type: z.enum([...EVENT_TYPES, "test"]),
-  post_id: z
-    .string()
-    .regex(/^[1-9][0-9]{0,18}$/)
-    .optional(),
-  route_id: NotificationRouteID.optional(),
-});
+const Payload = z
+  .strictObject({
+    aps: z.strictObject({
+      alert: NotificationAlert,
+      sound: z.literal("default"),
+    }),
+    event_type: z.enum([...EVENT_TYPES, "test"]),
+    post_id: z
+      .string()
+      .regex(/^[1-9][0-9]{0,18}$/)
+      .optional(),
+    route_id: NotificationRouteID.optional(),
+  })
+  .refine(
+    (payload) =>
+      payload.event_type !== "dm" ||
+      (payload.route_id !== undefined && "loc-key" in payload.aps.alert),
+  );
 const RetryJob = z.strictObject({
   accountId: z.uuid(),
   authority: z.discriminatedUnion("kind", [

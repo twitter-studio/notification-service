@@ -5,7 +5,15 @@ import { toBase64Url } from "../security/encoding";
 // 利用者の Worker から受け付けるイベントと、端末へ送る通知の中身 (ADR-0009)。
 
 /** 受け付けるイベントの種類 (許可リスト)。送り手が決めた種類を、そのまま端末へ渡さない。 */
-export const EVENT_TYPES = ["mention", "reply", "quote", "retweet", "like", "follow"] as const;
+export const EVENT_TYPES = [
+  "mention",
+  "reply",
+  "quote",
+  "retweet",
+  "like",
+  "follow",
+  "dm",
+] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -34,7 +42,7 @@ export type RelayEvent = {
 };
 
 /** ツイートを指さない種類。これらは `post_id` を受けない (ほかの種類は、`post_id` が要る)。 */
-export const EVENT_TYPES_WITHOUT_POST: ReadonlySet<EventType> = new Set(["follow"]);
+export const EVENT_TYPES_WITHOUT_POST: ReadonlySet<EventType> = new Set(["follow", "dm"]);
 
 /**
  * 受け付けの記録の鍵。アカウントと送り手の event_id の HMAC-SHA256 (Base64URL、43 文字)。
@@ -63,8 +71,12 @@ export type OutgoingNotification = {
   payload: NotificationPayload;
 };
 
+const NotificationMessage = z.enum([
+  "You have a new notification.",
+  "You have a new direct message.",
+]);
 export const NotificationAlert = z.union([
-  z.strictObject({ "loc-key": z.literal("You have a new notification.") }),
+  z.strictObject({ "loc-key": NotificationMessage }),
   z.strictObject({ title: z.string().regex(/^@[A-Za-z0-9_]{1,15}$/), body: PreviewExcerpt }),
 ]);
 
@@ -81,7 +93,12 @@ export function notificationPayload(event: RelayEvent): NotificationPayload {
     aps: {
       alert:
         preview === undefined
-          ? { "loc-key": "You have a new notification." }
+          ? {
+              "loc-key":
+                event.type === "dm"
+                  ? "You have a new direct message."
+                  : "You have a new notification.",
+            }
           : { title: `@${preview.author}`, body: preview.excerpt },
       sound: "default",
     },
