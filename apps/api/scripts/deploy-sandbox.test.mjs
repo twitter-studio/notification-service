@@ -890,3 +890,17 @@ test("本番の緊急停止はQueueの待機を妨げにせず、両方のスイ
   assert.equal(config.vars.PUBLIC_DELIVERY_ENABLED, "false");
   assert.equal((await executeDeployment(f.env, f)).status, "public_production_stop_deployed");
 });
+
+test("公開の配置後にsettingsが一致しても、稼働版の配送設定が違えば成功としない", async () => {
+  const f = fixture({
+    publicProduction: true,
+    mode: "open",
+    mutate(url, result) {
+      if (url.pathname.includes("/versions/") && f.count() === 1) {
+        result.bindings.find(({ name }) => name === "PUBLIC_DELIVERY_ENABLED").text = "false";
+      }
+    },
+  });
+  await assert.rejects(executeDeployment(f.env, f));
+  assert.equal(f.count(), 1);
+});
