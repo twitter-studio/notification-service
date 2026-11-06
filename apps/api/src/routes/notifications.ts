@@ -69,7 +69,8 @@ const EventSchema = z
       description: "アプリ内のアカウントを選ぶための識別子。DM では必須。端末への配送先は変えない",
     }),
     preview: NotificationPreview.optional().openapi({
-      description: "メンションと返信のみ。投稿者の @ を除いたユーザー名と本文の抜粋",
+      description:
+        "メンション・返信・引用ツイート・リツイート・いいねのみ。通知を起こした公開アカウントの @ を除いたユーザー名と、公開ツイート本文の抜粋",
     }),
     occurred_at: z.iso
       .datetime()
@@ -135,7 +136,7 @@ export function registerNotifications(
     requireDeliveryEnabled(c.env, { credentialId: credential.id, type: body.type });
     if (EVENT_TYPES_WITHOUT_POST.has(body.type) === (body.post_id !== undefined))
       throw new ProblemError(422, "Unprocessable Content", "The post ID does not match the type.");
-    if (body.preview !== undefined && body.type !== "mention" && body.type !== "reply")
+    if (body.preview !== undefined && (body.type === "follow" || body.type === "dm"))
       throw new ProblemError(422, "Unprocessable Content", "The preview does not match the type.");
     if (body.type === "dm" && body.route_id === undefined)
       throw new ProblemError(422, "Unprocessable Content", "A DM requires an account route.");

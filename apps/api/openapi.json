@@ -519,7 +519,7 @@
               "excerpt"
             ],
             "additionalProperties": false,
-            "description": "メンションと返信のみ。投稿者の @ を除いたユーザー名と本文の抜粋"
+            "description": "メンション・返信・引用ツイート・リツイート・いいねのみ。通知を起こした公開アカウントの @ を除いたユーザー名と、公開ツイート本文の抜粋"
           },
           "occurred_at": {
             "type": "string",
