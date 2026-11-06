@@ -8,6 +8,7 @@ import { challengeKeyFromEnv, issueChallenge } from "../src/security/challenge";
 import { toBase64Url } from "../src/security/encoding";
 import {
   deleteAccountMessage,
+  deviceMessage,
   enrollmentMessage,
   sessionMessage,
 } from "../src/security/installation-key";
@@ -39,12 +40,13 @@ async function trialEnrollment() {
       data: toBase64Url(attest.input.object),
     },
   };
-  return { body, attest };
+  return { body, attest, device };
 }
 
 it("公開実機試験は招待とApp Attestを要求し、期限後は登録と配送を閉じる", async () => {
-  const { body, attest } = await trialEnrollment();
-  const app = createApp({ appAttestVerifier: attest.verifier });
+  const { body, attest, device } = await trialEnrollment();
+  const sendDeviceVerification = vi.fn(async () => true);
+  const app = createApp({ appAttestVerifier: attest.verifier, sendDeviceVerification });
   const invite = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA";
   const inviteHash = await hashBearerToken(invite);
   const until = Date.now() + 60_000;
@@ -93,6 +95,62 @@ it("公開実機試験は招待とApp Attestを要求し、期限後は登録と
     ).status,
   ).toBe(409);
   const owner = await registered.json<Enrolled>();
+  const resume = { ...production, PUBLIC_TRIAL: JSON.stringify({ until, resume: true }) };
+  expect((await enroll(resume, { ...body, invite_code: invite })).status).toBe(403);
+  const registerDevice = async (config: typeof trial, apnsToken: string) => {
+    const key = await challengeKeyFromEnv(env);
+    const { challenge } = await issueChallenge(key, "device");
+    const registration = {
+      apnsEnvironment: "production" as const,
+      topic: "com.twitter-studio.Tweetbot",
+      apnsToken,
+      enabled: undefined,
+    };
+    return app.request(
+      `https://notification.test/v1/devices/${owner.installation_id}`,
+      {
+        method: "PUT",
+        headers: { ...jsonHeaders(), Authorization: `Bearer ${owner.session.token}` },
+        body: JSON.stringify({
+          challenge,
+          signature: await device.sign(
+            deviceMessage(challenge, owner.installation_id, registration),
+          ),
+          apns_token: apnsToken,
+          apns_environment: registration.apnsEnvironment,
+          topic: registration.topic,
+        }),
+      },
+      config,
+    );
+  };
+  const apnsToken = "a".repeat(64);
+  expect((await registerDevice(trial, apnsToken)).status).toBe(200);
+  expect((await registerDevice(resume, "b".repeat(64))).status).toBe(409);
+  expect(sendDeviceVerification).toHaveBeenCalledTimes(1);
+  expect((await registerDevice(resume, apnsToken)).status).toBe(200);
+  expect(sendDeviceVerification).toHaveBeenCalledTimes(2);
+  const relay = await app.request(
+    "https://notification.test/v1/notifications",
+    {
+      method: "POST",
+      headers: { ...jsonHeaders(), Authorization: `Bearer ${owner.relay_secret}` },
+      body: JSON.stringify({
+        event_id: "resume-relay",
+        type: "follow",
+        occurred_at: new Date().toISOString(),
+      }),
+    },
+    resume,
+  );
+  expect(relay.status).toBe(503);
+  const resumedTest = await app.request(
+    "https://notification.test/v1/notifications/test",
+    { method: "POST", headers: { Authorization: `Bearer ${owner.session.token}` } },
+    resume,
+  );
+  // 配送停止の503ではなく、所有確認を終えていない端末に対する409を返す。
+  expect(resumedTest.status).toBe(409);
   const test = await app.request(
     "https://notification.test/v1/notifications/test",
     { method: "POST", headers: { Authorization: `Bearer ${owner.session.token}` } },
@@ -233,6 +291,44 @@ it("公開配送の停止中に受け取った再送はAPNsへ送らず破棄す
   const info = vi.spyOn(console, "info").mockImplementation(() => {});
   try {
     await worker.queue(batch, production);
+    expect((await getQueueResult(batch, createExecutionContext())).explicitAcks).toEqual([id]);
+    expect(info).toHaveBeenCalledWith({ event: "delivery_discarded", reason: "operations_paused" });
+  } finally {
+    info.mockRestore();
+  }
+});
+
+it("公開再試験中はQueueの中継再送を破棄する", async () => {
+  const config = {
+    ...production,
+    PUBLIC_TRIAL: JSON.stringify({ until: Date.now() + 60_000, resume: true }),
+  };
+  const id = crypto.randomUUID();
+  const batch = createMessageBatch("notification-apns-retries", [
+    {
+      id,
+      timestamp: new Date(),
+      attempts: 1,
+      body: {
+        accountId: crypto.randomUUID(),
+        authority: { kind: "relay", credentialId: crypto.randomUUID() },
+        deviceId: crypto.randomUUID(),
+        fingerprint: `f1.${"a".repeat(43)}`,
+        environment: "production",
+        topic: "com.twitter-studio.Tweetbot",
+        eventKey: "b".repeat(43),
+        apnsId: crypto.randomUUID(),
+        expiresAt: Date.now() + 60_000,
+        payload: {
+          aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
+          event_type: "follow",
+        },
+      },
+    },
+  ]);
+  const info = vi.spyOn(console, "info").mockImplementation(() => {});
+  try {
+    await worker.queue(batch, config);
     expect((await getQueueResult(batch, createExecutionContext())).explicitAcks).toEqual([id]);
     expect(info).toHaveBeenCalledWith({ event: "delivery_discarded", reason: "operations_paused" });
   } finally {

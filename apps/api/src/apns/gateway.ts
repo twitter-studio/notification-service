@@ -141,7 +141,7 @@ export class ApnsPushGateway {
     };
   }
 
-  async consume(batch: MessageBatch<unknown>): Promise<void> {
+  async consume(batch: MessageBatch<unknown>, { allowRelay = true } = {}): Promise<void> {
     for (const message of batch.messages) {
       let result: ApnsResult;
       try {
@@ -158,6 +158,11 @@ export class ApnsPushGateway {
           continue;
         }
         const job = parsed.data;
+        if (!allowRelay && job.authority.kind === "relay") {
+          recordTelemetry({ event: "delivery_discarded", reason: "operations_paused" });
+          message.ack();
+          continue;
+        }
         if (job.expiresAt <= this.now() || job.expiresAt > this.now() + RETENTION_MS) {
           recordTelemetry({ event: "delivery_discarded", reason: "expired" });
           message.ack();

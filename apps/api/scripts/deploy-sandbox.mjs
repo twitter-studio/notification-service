@@ -392,17 +392,23 @@ export async function executeDeployment(
       metrics.backlog_bytes !== 0
     )
       throw new DeploymentFailure();
-    if (config.vars.PUBLIC_TRIAL) {
-      const result = await api(
-        `d1/database/${input.D1_DATABASE_ID}/query`,
-        "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts",
-      );
-      z.tuple([
-        z.object({
-          success: z.literal(true),
-          results: z.tuple([z.object({ has_accounts: z.literal(0) })]),
-        }),
-      ]).parse(result);
+    const trial = publicProduction ? publicTrial(env) : undefined;
+    if (trial) {
+      const resume = trial.resume === true;
+      const sql = resume
+        ? `SELECT (SELECT COUNT(*) FROM notification_accounts) AS accounts,
+            EXISTS(SELECT 1 FROM notification_accounts a
+              JOIN installations i ON i.account_id = a.id
+              JOIN installation_attestations t ON t.installation_id = i.id
+              JOIN devices d ON d.installation_id = i.id
+              WHERE a.state = 'active' AND i.revoked_at IS NULL AND t.environment = 'production'
+                AND d.state = 'active' AND d.apns_environment = 'production') AS trial_device`
+        : "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts";
+      const result = await api(`d1/database/${input.D1_DATABASE_ID}/query`, sql);
+      const row = resume
+        ? z.object({ accounts: z.literal(1), trial_device: z.literal(1) })
+        : z.object({ has_accounts: z.literal(0) });
+      z.tuple([z.object({ success: z.literal(true), results: z.tuple([row]) })]).parse(result);
     }
   }
   const path = resolve(directory, `.sandbox-deploy-${randomUUID()}.jsonc`);

@@ -165,10 +165,15 @@ function fixture({
         let result;
         if (u.pathname.endsWith("/query")) {
           assert.equal(options.method, "POST");
-          assert.deepEqual(JSON.parse(options.body), {
-            sql: "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts",
-          });
-          result = [{ success: true, results: [{ has_accounts: 0 }] }];
+          const { sql } = JSON.parse(options.body);
+          if (trial.PUBLIC_TRIAL_RESUME === "true") {
+            assert.match(sql, /JOIN installation_attestations/);
+            assert.match(sql, /d\.apns_environment = 'production'/);
+            result = [{ success: true, results: [{ accounts: 1, trial_device: 1 }] }];
+          } else {
+            assert.equal(sql, "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts");
+            result = [{ success: true, results: [{ has_accounts: 0 }] }];
+          }
         } else if (u.pathname.includes("/d1/database/"))
           result = { uuid: env.D1_DATABASE_ID, name: config.d1_databases[0].database_name };
         else if (u.pathname.endsWith("/settings")) {
@@ -656,6 +661,38 @@ test("公開productionの試験は既存登録があれば拒否し、閉鎖配�
   assert.equal(
     (await executeDeployment(closing.env, closing)).status,
     "public_production_closed_deployed",
+  );
+});
+
+test("公開productionの再試験は既存の対象端末1台があるときに限る", async () => {
+  const trial = {
+    PUBLIC_TRIAL_UNTIL: new Date(Date.now() + 30 * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    PUBLIC_TRIAL_RESUME: "true",
+  };
+  const valid = fixture({ publicProduction: true, trial });
+  assert.equal(
+    (await executeDeployment(valid.env, valid)).status,
+    "public_production_trial_deployed",
+  );
+  for (const invalid of [{ accounts: 0 }, { accounts: 2 }, { trial_device: 0 }]) {
+    const f = fixture({
+      publicProduction: true,
+      trial,
+      mutate(url, result) {
+        if (url.pathname.endsWith("/query")) Object.assign(result[0].results[0], invalid);
+      },
+    });
+    await assert.rejects(executeDeployment(f.env, f));
+    assert.equal(f.count(), 0);
+  }
+  await assert.rejects(
+    executeDeployment(
+      {
+        ...valid.env,
+        PUBLIC_TRIAL_INVITE_HASH: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA",
+      },
+      valid,
+    ),
   );
 });
 

@@ -15,7 +15,7 @@ import type { AppEnv } from "../app";
 import type { DeviceVerificationSender } from "../devices/verification";
 import { DEVICE_VERIFICATION_TTL_MS } from "../devices/verification";
 import { requireSession } from "../middleware/session";
-import { requireDeliveryEnabled } from "../operations";
+import { isPublicTrialResume, requireDeliveryEnabled } from "../operations";
 import { ProblemError } from "../problem";
 import { hashBearerToken, newBearerToken } from "../security/bearer";
 import { challengeKeyFromEnv, InvalidChallengeError, verifyChallenge } from "../security/challenge";
@@ -221,6 +221,8 @@ export function registerDevices(
       apnsEnvironment: body.apns_environment,
       topic: body.topic,
     });
+    const existingTokenOnly = isPublicTrialResume(c.env);
+    if (existingTokenOnly) requireDeliveryEnabled(c.env);
     let registration: Awaited<ReturnType<typeof registerDeviceToken>>;
     try {
       registration = await registerDeviceToken(
@@ -233,6 +235,7 @@ export function registerDevices(
           apnsEnvironment: body.apns_environment,
           topic: body.topic,
           challenge,
+          existingTokenOnly,
         },
         now,
       );
@@ -241,8 +244,11 @@ export function registerDevices(
         throw new ProblemError(409, "Conflict", "The challenge has already been used.");
       throw error;
     }
-    if (registration.kind === "rejected")
+    if (registration.kind === "rejected") {
+      if (existingTokenOnly && (await findInstallationDevice(db, session)) !== undefined)
+        throw new ProblemError(409, "Conflict", "The registered APNs token does not match.");
       throw new ProblemError(401, "Unauthorized", "The installation is not active.");
+    }
     const owner = { accountId: session.accountId, deviceId: registration.deviceId };
     if (body.enabled === true) await enableDeviceByUser(db, owner, now);
     if (body.enabled === false) await disableDeviceByUser(db, owner, now);
