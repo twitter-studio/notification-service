@@ -77,3 +77,5 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 2. `Closed public production deployment` の `deploy` を起動し、`trial_until` に2時間以内のUTC終了時刻を指定する。`trial_invite_hash` には招待コードの文字列をSHA-256でハッシュし、パディングなしBase64URLにした値を渡す。オーナーが `production` Environment を承認する。Workflowは通常の登録・配送が閉じ、D1に登録がなく、Queueが空であることを確認してから配置する。
 3. `public_production_trial_deployed` を確認する。実機で招待コードを入力し、App Attest登録、端末所有確認、テスト通知を確認する。新規登録は1件だけ受け付ける。終了時刻を過ぎると、新規登録とAPNsへの新規送信は停止する。APNsが既に受理した通知は端末に届く場合がある。
 4. 試験が終わったらQueueが空であることを確認し、試験入力を空欄にして閉鎖配置を起動する。本人承認後、登録403、`PUBLIC_TRIAL` の解除、`PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` を確認する。
+
+前回の試験で登録が済み、所有確認やテスト通知を再試行する場合は、同じビルドと端末を使う。`trial_resume=true` と `trial_until` を指定し、`trial_invite_hash` は空欄にする。Workflowは前回の登録1件とproductionのApp Attestおよび端末登録を照合する。再試験の配送は登録済みのAPNsトークンへの所有確認とアプリ内のテスト通知に限る。中継はHTTP入口で拒否し、Queueに届いた中継の再送も破棄する。

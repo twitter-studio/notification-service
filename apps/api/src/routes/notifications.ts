@@ -122,7 +122,7 @@ export function registerNotifications(
   sendBudgetMs: number,
 ) {
   app.openapi(route, async (c) => {
-    requireDeliveryEnabled(c.env);
+    requireDeliveryEnabled(c.env, "relay");
     const credential = c.get("relayCredential");
     const body = c.req.valid("json");
     if (EVENT_TYPES_WITHOUT_POST.has(body.type) === (body.post_id !== undefined))

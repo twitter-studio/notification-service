@@ -18,19 +18,23 @@ type OperationsEnv = Pick<
 >;
 
 const tokenShape = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
-const Trial = z.strictObject({
-  until: z.int().positive(),
-  inviteHash: z.string().regex(tokenShape),
-});
+const Trial = z.union([
+  z.strictObject({ until: z.int().positive(), inviteHash: z.string().regex(tokenShape) }),
+  z.strictObject({ until: z.int().positive(), resume: z.literal(true) }),
+]);
 
-function activeTrial(env: OperationsEnv) {
+function publicTrial(env: OperationsEnv) {
   if (env.PUBLIC_TRIAL === undefined) return;
   try {
-    const trial = Trial.parse(JSON.parse(env.PUBLIC_TRIAL));
-    return trial.until > Date.now() ? trial : undefined;
+    return Trial.parse(JSON.parse(env.PUBLIC_TRIAL));
   } catch {
     return undefined;
   }
+}
+
+function activeTrial(env: OperationsEnv) {
+  const trial = publicTrial(env);
+  return trial !== undefined && trial.until > Date.now() ? trial : undefined;
 }
 
 export function publicOperationEnabled(
@@ -59,6 +63,7 @@ export async function enrollmentPermission(
   const trial = activeTrial(env);
   if (
     trial !== undefined &&
+    "inviteHash" in trial &&
     tokenShape.test(inviteCode) &&
     (await constantTimeEquals(await hashBearerToken(inviteCode), trial.inviteHash)) &&
     trial.until > Date.now()
@@ -70,8 +75,16 @@ export async function enrollmentPermission(
   }
 }
 
-export function requireDeliveryEnabled(env: OperationsEnv): void {
-  if (!publicOperationEnabled(env, "PUBLIC_DELIVERY_ENABLED")) {
+export function requireDeliveryEnabled(env: OperationsEnv, source?: "relay"): void {
+  if (
+    !publicOperationEnabled(env, "PUBLIC_DELIVERY_ENABLED") ||
+    (source === "relay" && isPublicTrialResume(env))
+  ) {
     throw new ProblemError(503, "Service Unavailable", undefined, { "Retry-After": "900" });
   }
+}
+
+export function isPublicTrialResume(env: OperationsEnv): boolean {
+  const trial = publicTrial(env);
+  return trial !== undefined && "resume" in trial;
 }

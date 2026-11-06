@@ -43,7 +43,7 @@ const ACTIVE_INSTALLATIONS_OF_ACCOUNT = `
  */
 export async function registerDeviceToken(
   db: Db,
-  input: DeviceRegistration & { challenge: ConsumedChallenge },
+  input: DeviceRegistration & { challenge: ConsumedChallenge; existingTokenOnly?: boolean },
   now = new Date(),
 ): Promise<DeviceRegistrationResult> {
   const consume = db.$client
@@ -54,7 +54,10 @@ export async function registerDeviceToken(
     .prepare(`
       INSERT INTO devices (id, installation_id, apns_token_ciphertext, token_fingerprint, apns_environment, topic, state, verified_at, updated_at)
       SELECT ?3, id, ?4, ?5, ?6, ?7, 'active', NULL, ?8 FROM (${ACTIVE_INSTALLATIONS_OF_ACCOUNT} AND installations.id = ?2)
-      WHERE true
+      WHERE ?9 = 0 OR EXISTS (
+        SELECT 1 FROM devices
+        WHERE installation_id = ?2 AND token_fingerprint = ?5 AND apns_environment = ?6 AND topic = ?7
+      )
       ON CONFLICT (installation_id) DO UPDATE SET
         verified_at = CASE
           WHEN devices.token_fingerprint = excluded.token_fingerprint
@@ -77,6 +80,7 @@ export async function registerDeviceToken(
       input.apnsEnvironment,
       input.topic,
       now.getTime(),
+      Number(input.existingTokenOnly === true),
     );
   const [, upserted] = await db.$client.batch<{ id: string }>([consume, upsert]);
   const row = upserted?.results[0];
