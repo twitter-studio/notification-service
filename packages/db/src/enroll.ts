@@ -37,6 +37,8 @@ export async function enrollInstallation(
     relaySecretHash: BearerTokenHash;
     /** 署名に使ったチャレンジ。バッチの先頭で使ったものとして記録し、同じチャレンジの 2 回目は UNIQUE で失敗する。 */
     challenge: ConsumedChallenge;
+    /** 試験用の登録枠。同じ試験で別のアカウントを並行して作らせない。 */
+    trialClaim?: ConsumedChallenge;
     /** 一緒に作るセッション。 */
     session?: NewSession;
   },
@@ -65,6 +67,9 @@ export async function enrollInstallation(
       db
         .insert(usedChallenges)
         .values({ nonce: input.challenge.nonce, expiresAt: input.challenge.expiresAt }),
+      ...(input.trialClaim === undefined
+        ? []
+        : [db.insert(usedChallenges).values(input.trialClaim)]),
       db.insert(notificationAccounts).values({ id: accountId, createdAt: now }),
       db.insert(installations).values({
         id: installationId,

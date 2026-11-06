@@ -4,7 +4,7 @@ import { unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { experimental_readRawConfig } from "wrangler";
 import { z } from "zod";
-import { checkDeploymentGate, DeploymentFailure } from "./deployment-gate.mjs";
+import { checkDeploymentGate, DeploymentFailure, publicTrial } from "./deployment-gate.mjs";
 
 const KIND = "service";
 const verificationWorker = "notification-service-prod-verification";
@@ -120,6 +120,8 @@ export function deploymentConfig(
       if (publicProduction) {
         config.vars.PUBLIC_ENROLLMENT_ENABLED = "false";
         config.vars.PUBLIC_DELIVERY_ENABLED = "false";
+        const trial = publicTrial(env);
+        if (trial) config.vars.PUBLIC_TRIAL = JSON.stringify(trial);
       }
     }
     config.d1_databases[0].database_id = input.D1_DATABASE_ID;
@@ -172,7 +174,7 @@ function checkSecrets(bindings, publicProduction) {
 export function checkSnapshot(
   snapshot,
   config,
-  { before = false, publicProduction = false, allowPublicBuildUpdate = false } = {},
+  { before = false, publicProduction = false, publicPreflight = false } = {},
 ) {
   const bindings = z
     .array(
@@ -188,7 +190,10 @@ export function checkSnapshot(
   if (
     publicProduction &&
     bindings.some(
-      (binding) => binding.type === "plain_text" && !Object.hasOwn(config.vars, binding.name),
+      (binding) =>
+        binding.type === "plain_text" &&
+        !Object.hasOwn(config.vars, binding.name) &&
+        !(publicPreflight && binding.name === "PUBLIC_TRIAL"),
     )
   )
     throw new DeploymentFailure();
@@ -196,6 +201,10 @@ export function checkSnapshot(
     const current = bindings.find(
       (binding) => binding.name === key && binding.type === "plain_text",
     );
+    if (publicPreflight && key === "PUBLIC_TRIAL") {
+      if (bindings.some((binding) => binding.name === key)) throw new DeploymentFailure();
+      continue;
+    }
     if (!current) throw new DeploymentFailure();
     if (before && key === "DEVICE_TOKEN_KEY_CHECKS") {
       const schema = z.strictObject({
@@ -212,7 +221,7 @@ export function checkSnapshot(
         !Object.entries(oldChecks.keys).every(([id, kcv]) => newChecks.keys[id] === kcv)
       )
         throw new DeploymentFailure();
-    } else if (publicProduction && allowPublicBuildUpdate && key === "APP_ATTEST_POLICY") {
+    } else if (publicProduction && publicPreflight && key === "APP_ATTEST_POLICY") {
       const policy = JSON.parse(value);
       z.strictObject({
         mode: z.literal(policy.mode),
@@ -318,10 +327,16 @@ export async function executeDeployment(
     });
     return result;
   }
-  async function api(path) {
+  async function api(path, sql) {
     const result = await response(
       `https://api.cloudflare.com/client/v4/accounts/${input.CLOUDFLARE_ACCOUNT_ID}/${path}`,
-      { headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}` } },
+      {
+        headers: {
+          Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
+          ...(sql === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        ...(sql === undefined ? {} : { method: "POST", body: JSON.stringify({ sql }) }),
+      },
     );
     if (result.status !== 200) {
       await result.body?.cancel();
@@ -357,6 +372,7 @@ export async function executeDeployment(
           binding.text === "true",
       );
     if (bootstrap) {
+      if (config.vars.PUBLIC_TRIAL) throw new DeploymentFailure();
       if (settings.bindings.length !== expectedSecrets(publicProduction).length + 1)
         throw new DeploymentFailure();
       checkSecrets(settings.bindings, publicProduction);
@@ -364,7 +380,7 @@ export async function executeDeployment(
       checkSnapshot(settings, config, {
         before: !productionVerification && !publicProduction,
         publicProduction,
-        allowPublicBuildUpdate: publicProduction,
+        publicPreflight: publicProduction,
       });
     }
     const details = await api(queue);
@@ -376,8 +392,21 @@ export async function executeDeployment(
       metrics.backlog_bytes !== 0
     )
       throw new DeploymentFailure();
+    if (config.vars.PUBLIC_TRIAL) {
+      const result = await api(
+        `d1/database/${input.D1_DATABASE_ID}/query`,
+        "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts",
+      );
+      z.tuple([
+        z.object({
+          success: z.literal(true),
+          results: z.tuple([z.object({ has_accounts: z.literal(0) })]),
+        }),
+      ]).parse(result);
+    }
   }
   const path = resolve(directory, `.sandbox-deploy-${randomUUID()}.jsonc`);
+  if (publicProduction) publicTrial(env);
   try {
     writeFileSync(path, JSON.stringify(config), { mode: 0o600, flag: "wx" });
     const args =
@@ -478,7 +507,9 @@ export async function executeDeployment(
     }
     return {
       status: publicProduction
-        ? "public_production_closed_deployed"
+        ? config.vars.PUBLIC_TRIAL
+          ? "public_production_trial_deployed"
+          : "public_production_closed_deployed"
         : productionVerification
           ? "production_verification_deployed"
           : "sandbox_deployed",

@@ -7,7 +7,7 @@ import {
   cleanupExpiredAuthRecords,
   cleanupStaleDevices,
 } from "./maintenance";
-import { publicOperationEnabled, type RuntimeEnv } from "./operations";
+import { publicOperationEnabled, type RuntimeEnv, requireDeliveryEnabled } from "./operations";
 import { recordQueueMetrics } from "./queue-metrics";
 import { recordTelemetry } from "./telemetry";
 
@@ -22,7 +22,16 @@ function application(env: RuntimeEnv) {
     currentClient = { configuration, client: new ApnsClient(configuration) };
   let value = applications.get(env);
   if (value === undefined || value.configuration !== configuration) {
-    const gateway = new ApnsPushGateway(env, { client: currentClient.client });
+    const client =
+      env.PUBLIC_TRIAL === undefined
+        ? currentClient.client
+        : new ApnsClient(configuration, {
+            send: (request, init) => {
+              requireDeliveryEnabled(env);
+              return fetch(request, init);
+            },
+          });
+    const gateway = new ApnsPushGateway(env, { client });
     value = {
       configuration,
       gateway,

@@ -3,12 +3,30 @@ export class DeploymentFailure extends Error {
     super("deployment_rejected");
   }
 }
+export function publicTrial(env) {
+  const { PUBLIC_TRIAL_UNTIL: deadline, PUBLIC_TRIAL_INVITE_HASH: inviteHash } = env;
+  if (!deadline && !inviteHash) return;
+  const now = Date.now();
+  const until = Date.parse(deadline ?? "");
+  if (
+    env.DEPLOY_OPERATION !== "deploy" ||
+    !Number.isFinite(until) ||
+    new Date(until).toISOString().replace(".000Z", "Z") !== deadline ||
+    until <= now ||
+    until > now + 2 * 60 * 60 * 1000 ||
+    !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(inviteHash ?? "")
+  )
+    throw new DeploymentFailure();
+  return { until, inviteHash };
+}
+
 export function deploymentRequest(
   env,
   allowMigration = false,
   productionVerification = false,
   publicProduction = false,
 ) {
+  if (publicProduction) publicTrial(env);
   const operation = env.DEPLOY_OPERATION;
   if (productionVerification && publicProduction) throw new DeploymentFailure();
   const enabled = publicProduction
