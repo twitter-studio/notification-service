@@ -169,7 +169,11 @@ function checkSecrets(bindings, publicProduction) {
   )
     throw new DeploymentFailure();
 }
-export function checkSnapshot(snapshot, config, { before = false, publicProduction = false } = {}) {
+export function checkSnapshot(
+  snapshot,
+  config,
+  { before = false, publicProduction = false, allowPublicBuildUpdate = false } = {},
+) {
   const bindings = z
     .array(
       z.object({
@@ -208,6 +212,14 @@ export function checkSnapshot(snapshot, config, { before = false, publicProducti
         !Object.entries(oldChecks.keys).every(([id, kcv]) => newChecks.keys[id] === kcv)
       )
         throw new DeploymentFailure();
+    } else if (publicProduction && allowPublicBuildUpdate && key === "APP_ATTEST_POLICY") {
+      const policy = JSON.parse(value);
+      z.strictObject({
+        mode: z.literal(policy.mode),
+        environment: z.literal(policy.environment),
+        appId: z.literal(policy.appId),
+        bundleVersions: z.tuple([z.string().regex(/^[1-9][0-9]{0,8}$/)]),
+      }).parse(JSON.parse(current.text));
     } else if (before && key === "APP_ATTEST_POLICY") {
       const schema = z.strictObject({
         mode: z.literal("invite_only"),
@@ -352,6 +364,7 @@ export async function executeDeployment(
       checkSnapshot(settings, config, {
         before: !productionVerification && !publicProduction,
         publicProduction,
+        allowPublicBuildUpdate: publicProduction,
       });
     }
     const details = await api(queue);

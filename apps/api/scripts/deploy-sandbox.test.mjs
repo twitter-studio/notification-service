@@ -560,6 +560,37 @@ test("公開productionでは専用Environmentが無効、または検証Worker�
   assert.equal(f.count(), 0);
 });
 
+test("公開productionは閉鎖したまま許可ビルドを更新し、配置後に新しい値を確認する", async () => {
+  const f = fixture({
+    publicProduction: true,
+    mutate(url, settings) {
+      if (!url.pathname.endsWith("/settings") || f.count() !== 0) return;
+      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["1"] });
+    },
+  });
+  assert.equal((await executeDeployment(f.env, f)).status, "public_production_closed_deployed");
+  assert.equal(f.count(), 1);
+});
+
+test("公開productionの許可ビルド更新はApp IDの相違や配置後の旧ビルドを拒否する", async () => {
+  for (const after of [false, true]) {
+    const f = fixture({
+      publicProduction: true,
+      mutate(url, settings) {
+        if (!url.pathname.endsWith("/settings") || f.count() > 0 !== after) return;
+        const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+        const policy = JSON.parse(binding.text);
+        if (after) policy.bundleVersions = ["1"];
+        else policy.appId = "PU5HXZ4FZ2.com.example.other";
+        binding.text = JSON.stringify(policy);
+      },
+    });
+    await assert.rejects(executeDeployment(f.env, f));
+    assert.equal(f.count(), Number(after));
+  }
+});
+
 test("公開productionの招待secret、異なるDB・Queue、滞留を配置前に拒否する", async () => {
   for (const change of [
     (url, result) => {
