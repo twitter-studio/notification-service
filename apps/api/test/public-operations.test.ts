@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
 import worker from "../src/index";
+import { hashBearerToken } from "../src/security/bearer";
 import { challengeKeyFromEnv, issueChallenge } from "../src/security/challenge";
 import { toBase64Url } from "../src/security/encoding";
 import {
@@ -19,6 +20,55 @@ const production = {
   ...env,
   APP_ATTEST_POLICY: JSON.stringify({ ...policy, mode: "required", environment: "production" }),
 };
+
+it("公開実機試験は招待とApp Attestを要求し、期限後は登録と配送を閉じる", async () => {
+  const device = await newDeviceKey();
+  const key = await challengeKeyFromEnv(env);
+  const challenge = (await issueChallenge(key, "enroll")).challenge;
+  const message = enrollmentMessage(challenge, device.publicKey);
+  const attest = await fixture({
+    environment: "production",
+    clientData: new TextEncoder().encode(message),
+  });
+  const app = createApp({ appAttestVerifier: attest.verifier });
+  const invite = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA";
+  const inviteHash = await hashBearerToken(invite);
+  const trial = {
+    ...production,
+    PUBLIC_TRIAL: JSON.stringify({ until: Date.now() + 60_000, inviteHash }),
+  };
+  const expired = { ...trial, PUBLIC_TRIAL: JSON.stringify({ until: Date.now() - 1, inviteHash }) };
+  const body = {
+    challenge,
+    public_key: device.publicKey,
+    signature: await device.sign(message),
+    app_attest: {
+      kind: "attestation",
+      key_id: toBase64Url(attest.input.keyId),
+      data: toBase64Url(attest.input.object),
+    },
+  };
+  const enroll = (config: typeof trial, input: unknown) =>
+    app.request(
+      "https://notification.test/v1/enrollments",
+      { method: "POST", headers: jsonHeaders(), body: JSON.stringify(input) },
+      config,
+    );
+  expect((await enroll(trial, body)).status).toBe(403);
+  expect(
+    (await enroll(trial, { ...body, invite_code: invite, app_attest: undefined })).status,
+  ).toBe(401);
+  expect((await enroll(expired, { ...body, invite_code: invite })).status).toBe(403);
+  const registered = await enroll(trial, { ...body, invite_code: invite });
+  expect(registered.status).toBe(201);
+  const owner = await registered.json<Enrolled>();
+  const test = await app.request(
+    "https://notification.test/v1/notifications/test",
+    { method: "POST", headers: { Authorization: `Bearer ${owner.session.token}` } },
+    expired,
+  );
+  expect(test.status).toBe(503);
+});
 
 it("公開登録とAPNs送信を個別に停止しても、既存のセッション更新、設定、削除を続けられる", async () => {
   const device = await newDeviceKey();

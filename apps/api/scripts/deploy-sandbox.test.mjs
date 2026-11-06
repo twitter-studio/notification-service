@@ -63,8 +63,13 @@ function fixture({
   publicProduction = false,
   bootstrap = false,
   edgeForbidden = false,
+  trial = {},
 } = {}) {
-  const targetEnv = publicProduction ? publicEnv : productionVerification ? productionEnv : env;
+  const targetEnv = publicProduction
+    ? { ...publicEnv, ...trial }
+    : productionVerification
+      ? productionEnv
+      : env;
   const target = publicProduction
     ? "production"
     : productionVerification
@@ -158,10 +163,18 @@ function fixture({
       if (u.hostname === "api.cloudflare.com") {
         assert.equal(options.headers.Authorization, "Bearer synthetic-cloudflare-secret");
         let result;
-        if (u.pathname.includes("/d1/database/"))
+        if (u.pathname.endsWith("/query")) {
+          assert.equal(options.method, "POST");
+          assert.deepEqual(JSON.parse(options.body), {
+            sql: "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts",
+          });
+          result = [{ success: true, results: [{ has_accounts: 0 }] }];
+        } else if (u.pathname.includes("/d1/database/"))
           result = { uuid: env.D1_DATABASE_ID, name: config.d1_databases[0].database_name };
         else if (u.pathname.endsWith("/settings")) {
           result = structuredClone(snapshot);
+          if (mutations === 0)
+            result.bindings = result.bindings.filter((binding) => binding.name !== "PUBLIC_TRIAL");
           if (bootstrap && mutations === 0) {
             result.bindings = result.bindings.filter((binding) => binding.type === "secret_text");
             result.bindings.push({
@@ -589,6 +602,61 @@ test("公開productionの許可ビルド更新はApp IDの相違や配置後の�
     await assert.rejects(executeDeployment(f.env, f));
     assert.equal(f.count(), Number(after));
   }
+});
+
+test("公開productionの試験は保護Environmentで期限と招待ハッシュを指定する", async () => {
+  const trial = {
+    PUBLIC_TRIAL_UNTIL: new Date(Date.now() + 30 * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    PUBLIC_TRIAL_INVITE_HASH: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA",
+  };
+  const f = fixture({ publicProduction: true, trial });
+  assert.equal((await executeDeployment(f.env, f)).status, "public_production_trial_deployed");
+  for (const overrides of [
+    { PUBLIC_TRIAL_INVITE_HASH: "" },
+    { PUBLIC_TRIAL_INVITE_HASH: "a".repeat(43) },
+    { PUBLIC_TRIAL_UNTIL: "2020-01-01T00:00:00Z" },
+    { PUBLIC_TRIAL_UNTIL: "2099-01-01T00:00:00Z" },
+    {
+      DEPLOY_OPERATION: "migrate",
+      DEPLOY_CONFIRMATION: `migrate:${sha}`,
+      BACKUP_CONFIRMED: "true",
+    },
+  ]) {
+    await assert.rejects(executeDeployment({ ...f.env, ...overrides }, f));
+    assert.equal(f.count(), 1);
+  }
+});
+
+test("公開productionの試験は既存登録があれば拒否し、閉鎖配置で試験設定を取り除ける", async () => {
+  const trial = {
+    PUBLIC_TRIAL_UNTIL: new Date(Date.now() + 30 * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    PUBLIC_TRIAL_INVITE_HASH: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA",
+  };
+  const populated = fixture({
+    publicProduction: true,
+    trial,
+    mutate(url, result) {
+      if (url.pathname.endsWith("/query")) result[0].results[0].has_accounts = 1;
+    },
+  });
+  await assert.rejects(executeDeployment(populated.env, populated));
+  assert.equal(populated.count(), 0);
+  const closing = fixture({
+    publicProduction: true,
+    mutate(url, settings) {
+      if (url.pathname.endsWith("/settings") && closing.count() === 0) {
+        settings.bindings.push({
+          name: "PUBLIC_TRIAL",
+          type: "plain_text",
+          text: "previous trial",
+        });
+      }
+    },
+  });
+  assert.equal(
+    (await executeDeployment(closing.env, closing)).status,
+    "public_production_closed_deployed",
+  );
 });
 
 test("公開productionの招待secret、異なるDB・Queue、滞留を配置前に拒否する", async () => {

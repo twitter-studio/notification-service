@@ -61,7 +61,7 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 
 ## 公開用productionを閉じた状態で準備する
 
-対象は `notification-service-production` のWorkerとD1、`notification-apns-production` Queue。sandboxとproduction検証用の資源を再利用しない。このWorkflowは登録・配送を閉じたまま、最初のmigrationとWorkerの配置を別々に行う。一般登録を有効にする操作は別の変更としてレビューする。
+対象は `notification-service-production` のWorkerとD1、`notification-apns-production` Queue。sandboxとproduction検証用の資源を再利用しない。最初のmigrationとWorkerの配置は登録・配送を閉じた状態で別々に行う。一般登録を有効にする操作は別の変更としてレビューする。
 
 1. オーナーの承認後、専用D1とQueueを作り、外部の入口を持たず404だけを返す[初期Worker](../apps/api/public-bootstrap/wrangler.jsonc)を用意する。初期Workerの平文変数は `PUBLIC_PRODUCTION_BOOTSTRAP=true` のみ。APNs provider鍵、チャレンジ署名鍵、端末トークンの暗号鍵束と指紋鍵を、対象Workerのsecretに置く。公開用の端末トークン鍵とチャレンジ鍵は別途生成する。APNs鍵の選定と運用対象は承認記録に残す。
 2. GitHubの `production` と `production-migrations` を本人1名のrequired reviewer、main限定、管理者bypass禁止で設定する。配置とmigrationの資格情報を分ける。必要な権限は配置先Workerだけの編集、D1参照、Queue管理と、migration先D1の編集。配置前にCloudflareのWorker情報から公開URLを照合する。個別に絞れない権限は、発行前に許可範囲を記録する。
@@ -69,4 +69,11 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 4. リポジトリの `PUBLIC_PRODUCTION_DEPLOY_ENABLED` は通常false。作業中だけtrueにし、`Closed public production deployment` をmainのCI成功SHAで起動する。専用D1に初期migrationを適用した後、別runでWorkerを配置する。各runはオーナー本人がEnvironment承認を行う。
 5. `public_production_closed_deployed`、health 200、登録403、専用のbindingとQueue空を確認する。公開用のApp Attestは `required` と `production`、招待secretは存在しない。両スイッチはfalse。完了後は配置有効化変数をfalseに戻し、migration用の資格情報を整理する。
 
-この配置は新規登録、APNs送信、X購読、App Store Connectへのアップロードを含まない。対応する配布候補と利用条件は [RELEASE-001](https://github.com/twitter-studio/notification-docs/issues/3) で確認する。
+対応する配布候補と利用条件は [RELEASE-001](https://github.com/twitter-studio/notification-docs/issues/3) で確認する。
+
+### 内部TestFlightの実機試験
+
+1. オーナーと対象ビルド、端末、終了時刻を確定する。`PROD_BUNDLE_VERSION` に配布後のビルド番号を指定する。32バイトの乱数をパディングなしBase64URLにした招待コードを保護ファイルに保存し、試験端末の操作者に渡す。
+2. `Closed public production deployment` の `deploy` を起動し、`trial_until` に2時間以内のUTC終了時刻を指定する。`trial_invite_hash` には招待コードの文字列をSHA-256でハッシュし、パディングなしBase64URLにした値を渡す。オーナーが `production` Environment を承認する。Workflowは通常の登録・配送が閉じ、D1に登録がなく、Queueが空であることを確認してから配置する。
+3. `public_production_trial_deployed` を確認する。実機で招待コードを入力し、App Attest登録、端末所有確認、テスト通知を確認する。終了時刻を過ぎると、新規登録とAPNsへの新規送信は停止する。APNsが既に受理した通知は端末に届く場合がある。
+4. 試験が終わったらQueueが空であることを確認し、試験入力を空欄にして閉鎖配置を起動する。本人承認後、登録403、`PUBLIC_TRIAL` の解除、`PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` を確認する。

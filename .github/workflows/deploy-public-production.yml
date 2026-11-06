@@ -30,6 +30,14 @@ on:
         description: migrate前の復旧地点・復旧承認・停止範囲を記録した
         type: boolean
         default: false
+      trial_until:
+        description: 試験の終了時刻（UTCのYYYY-MM-DDTHH:MM:SSZ、空欄は閉鎖）
+        required: false
+        type: string
+      trial_invite_hash:
+        description: 試験用の招待コードのSHA-256（Base64URL）
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -48,6 +56,8 @@ env:
   BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
   PUBLIC_PRODUCTION_DEPLOY_ENABLED: ${{ vars.PUBLIC_PRODUCTION_DEPLOY_ENABLED }}
   DEPLOY_REVIEWER: ${{ vars.DEPLOY_REVIEWER }}
+  PUBLIC_TRIAL_UNTIL: ${{ inputs.trial_until }}
+  PUBLIC_TRIAL_INVITE_HASH: ${{ inputs.trial_invite_hash }}
 
 jobs:
   gate:

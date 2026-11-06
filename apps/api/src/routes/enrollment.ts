@@ -9,7 +9,7 @@ import {
 } from "@notification-service/db";
 import type { Context } from "hono";
 import type { AppEnv } from "../app";
-import { publicOperationEnabled } from "../operations";
+import { enrollmentEnabled } from "../operations";
 import { ProblemError } from "../problem";
 import {
   AppAttestProof,
@@ -232,7 +232,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
   app.openapi(enrollRoute, async (c) => {
     await enforceRateLimit(c.env.CLIENT_RATE_LIMITER, clientAddressKey(c.req.raw));
     const body = c.req.valid("json");
-    if (!publicOperationEnabled(c.env, "PUBLIC_ENROLLMENT_ENABLED")) {
+    if (!(await enrollmentEnabled(c.env, body.invite_code ?? ""))) {
       throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
     }
     if (appAttestPolicy(c.env).mode !== "required")
@@ -278,6 +278,13 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
     });
     const relaySecret = newBearerToken("relay");
     const session = await newSession(now);
+    const relaySecretHash = await hashBearerToken(relaySecret);
+    if (
+      c.env.PUBLIC_TRIAL !== undefined &&
+      !(await enrollmentEnabled(c.env, body.invite_code ?? ""))
+    ) {
+      throw new ProblemError(403, "Forbidden", "Enrollment is not available.");
+    }
     try {
       const enrolled =
         existing?.accountId !== undefined
@@ -287,7 +294,7 @@ export function registerEnrollment(app: OpenAPIHono<AppEnv>, verifier: AppAttest
               {
                 publicKey: body.public_key,
                 ...(attestation.kind === "initial" ? { attestation: attestation.value } : {}),
-                relaySecretHash: await hashBearerToken(relaySecret),
+                relaySecretHash,
                 challenge,
                 session: session.record,
               },
