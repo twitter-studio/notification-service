@@ -7,7 +7,7 @@ import {
 } from "@notification-service/db";
 import { z } from "zod";
 import { DEVICE_VERIFICATION_TTL_MS, type DeviceVerificationSender } from "../devices/verification";
-import { EVENT_TYPES, NotificationRouteID } from "../notifications/payload";
+import { EVENT_TYPES, NotificationAlert, NotificationRouteID } from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
 import { recordTelemetry } from "../telemetry";
@@ -17,7 +17,7 @@ const RETENTION_MS = 60 * 60 * 1000;
 const MAX_QUEUE_ATTEMPTS = 2;
 const Payload = z.strictObject({
   aps: z.strictObject({
-    alert: z.strictObject({ "loc-key": z.literal("You have a new notification.") }),
+    alert: NotificationAlert,
     sound: z.literal("default"),
   }),
   event_type: z.enum([...EVENT_TYPES, "test"]),
