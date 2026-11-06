@@ -126,7 +126,7 @@ it("公開実機試験は招待とApp Attestを要求し、期限後は登録と
   };
   const apnsToken = "a".repeat(64);
   expect((await registerDevice(trial, apnsToken)).status).toBe(200);
-  expect((await registerDevice(resume, "b".repeat(64))).status).toBe(401);
+  expect((await registerDevice(resume, "b".repeat(64))).status).toBe(409);
   expect(sendDeviceVerification).toHaveBeenCalledTimes(1);
   expect((await registerDevice(resume, apnsToken)).status).toBe(200);
   expect(sendDeviceVerification).toHaveBeenCalledTimes(2);

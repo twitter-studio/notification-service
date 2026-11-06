@@ -244,8 +244,11 @@ export function registerDevices(
         throw new ProblemError(409, "Conflict", "The challenge has already been used.");
       throw error;
     }
-    if (registration.kind === "rejected")
+    if (registration.kind === "rejected") {
+      if (existingTokenOnly && (await findInstallationDevice(db, session)) !== undefined)
+        throw new ProblemError(409, "Conflict", "The registered APNs token does not match.");
       throw new ProblemError(401, "Unauthorized", "The installation is not active.");
+    }
     const owner = { accountId: session.accountId, deviceId: registration.deviceId };
     if (body.enabled === true) await enableDeviceByUser(db, owner, now);
     if (body.enabled === false) await disableDeviceByUser(db, owner, now);
