@@ -88,7 +88,7 @@ export type NotificationPayload = {
 };
 
 export function notificationPayload(event: RelayEvent): NotificationPayload {
-  const preview = event.type === "mention" || event.type === "reply" ? event.preview : undefined;
+  const preview = event.type === "follow" || event.type === "dm" ? undefined : event.preview;
   return {
     aps: {
       alert:

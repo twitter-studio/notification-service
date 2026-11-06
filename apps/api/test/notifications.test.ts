@@ -87,31 +87,35 @@ async function relay(app: ReturnType<typeof createApp>, secret: string | undefin
 }
 
 describe("中継の受け付け", () => {
-  it.each(["mention", "reply"])("%s のプレビューを資格情報に紐づく端末だけに送る", async (type) => {
-    const { app, sent } = appWithPush();
-    const recipient = await accountWithDevice();
-    await accountWithDevice();
-    const preview = { author: "example", excerpt: "検証用のツイート" };
-    const routeID = crypto.randomUUID();
-    const event = newEvent({ type, preview, route_id: routeID });
+  it.each(["mention", "reply", "quote", "retweet", "like"])(
+    "%s のプレビューを資格情報に紐づく端末だけに送る",
+    async (type) => {
+      const { app, sent } = appWithPush();
+      const recipient = await accountWithDevice();
+      await accountWithDevice();
+      const preview = { author: "example", excerpt: "検証用のツイート" };
+      const routeID = crypto.randomUUID();
+      const event = newEvent({ type, preview, route_id: routeID });
 
-    expect((await relay(app, recipient.enrolled.relay_secret, event)).status).toBe(202);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({
-      target: { apnsToken: recipient.apnsToken },
-      notification: {
-        payload: {
-          aps: { alert: { title: "@example", body: preview.excerpt } },
-          event_type: type,
-          post_id: event.post_id,
-          route_id: routeID,
+      expect((await relay(app, recipient.enrolled.relay_secret, event)).status).toBe(202);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        target: { apnsToken: recipient.apnsToken },
+        notification: {
+          payload: {
+            aps: { alert: { title: "@example", body: preview.excerpt } },
+            event_type: type,
+            post_id: event.post_id,
+            route_id: routeID,
+          },
         },
-      },
-    });
-  });
+      });
+    },
+  );
 
   it.each([
-    ["like", { author: "example", excerpt: "preview" }],
+    ["follow", { author: "example", excerpt: "preview" }],
+    ["dm", { author: "example", excerpt: "preview" }],
     ["reply", { author: "other account", excerpt: "preview" }],
     ["mention", { author: "example", excerpt: "hello\u202eworld" }],
     ["reply", { author: "example", excerpt: "界".repeat(281) }],
@@ -119,7 +123,19 @@ describe("中継の受け付け", () => {
     const { app, sent } = appWithPush();
     const recipient = await accountWithDevice();
     expect(
-      (await relay(app, recipient.enrolled.relay_secret, newEvent({ type, preview }))).status,
+      (
+        await relay(
+          app,
+          recipient.enrolled.relay_secret,
+          newEvent({
+            type,
+            preview,
+            ...(type === "follow" || type === "dm"
+              ? { post_id: undefined, route_id: crypto.randomUUID() }
+              : {}),
+          }),
+        )
+      ).status,
     ).toBe(422);
     expect(sent).toHaveLength(0);
   });
