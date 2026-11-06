@@ -8,10 +8,10 @@ import {
   cleanupStaleDevices,
 } from "./maintenance";
 import {
-  isPublicTrialResume,
   publicOperationEnabled,
   type RuntimeEnv,
   requireDeliveryEnabled,
+  trialAllowsRelay,
 } from "./operations";
 import { recordQueueMetrics } from "./queue-metrics";
 import { recordTelemetry } from "./telemetry";
@@ -86,7 +86,9 @@ export default {
         }
         return;
       }
-      await application(env).gateway.consume(batch, { allowRelay: !isPublicTrialResume(env) });
+      await application(env).gateway.consume(batch, {
+        allowRelay: (credentialId, type) => trialAllowsRelay(env, credentialId, type),
+      });
     } catch {
       console.error(JSON.stringify({ event: "apns_queue_configuration_invalid" }));
       for (const message of batch.messages) {

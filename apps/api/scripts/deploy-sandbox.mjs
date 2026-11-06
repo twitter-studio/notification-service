@@ -327,7 +327,7 @@ export async function executeDeployment(
     });
     return result;
   }
-  async function api(path, sql) {
+  async function api(path, sql, params) {
     const result = await response(
       `https://api.cloudflare.com/client/v4/accounts/${input.CLOUDFLARE_ACCOUNT_ID}/${path}`,
       {
@@ -335,7 +335,7 @@ export async function executeDeployment(
           Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
           ...(sql === undefined ? {} : { "Content-Type": "application/json" }),
         },
-        ...(sql === undefined ? {} : { method: "POST", body: JSON.stringify({ sql }) }),
+        ...(sql === undefined ? {} : { method: "POST", body: JSON.stringify({ sql, params }) }),
       },
     );
     if (result.status !== 200) {
@@ -402,9 +402,14 @@ export async function executeDeployment(
               JOIN installation_attestations t ON t.installation_id = i.id
               JOIN devices d ON d.installation_id = i.id
               WHERE a.state = 'active' AND i.revoked_at IS NULL AND t.environment = 'production'
-                AND d.state = 'active' AND d.apns_environment = 'production') AS trial_device`
+                AND d.state = 'active' AND d.apns_environment = 'production'
+                ${trial.relayId ? "AND d.verified_at IS NOT NULL AND EXISTS(SELECT 1 FROM relay_credentials r WHERE r.account_id = a.id AND r.id = ?1 AND r.revoked_at IS NULL AND (r.expires_at IS NULL OR r.expires_at >= ?2))" : ""}) AS trial_device`
         : "SELECT EXISTS(SELECT 1 FROM notification_accounts) AS has_accounts";
-      const result = await api(`d1/database/${input.D1_DATABASE_ID}/query`, sql);
+      const result = await api(
+        `d1/database/${input.D1_DATABASE_ID}/query`,
+        sql,
+        trial.relayId ? [trial.relayId, String(trial.until)] : undefined,
+      );
       const row = resume
         ? z.object({ accounts: z.literal(1), trial_device: z.literal(1) })
         : z.object({ has_accounts: z.literal(0) });

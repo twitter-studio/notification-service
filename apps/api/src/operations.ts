@@ -20,7 +20,11 @@ type OperationsEnv = Pick<
 const tokenShape = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 const Trial = z.union([
   z.strictObject({ until: z.int().positive(), inviteHash: z.string().regex(tokenShape) }),
-  z.strictObject({ until: z.int().positive(), resume: z.literal(true) }),
+  z.strictObject({
+    until: z.int().positive(),
+    resume: z.literal(true),
+    relayId: z.uuid().optional(),
+  }),
 ]);
 
 function publicTrial(env: OperationsEnv) {
@@ -75,13 +79,26 @@ export async function enrollmentPermission(
   }
 }
 
-export function requireDeliveryEnabled(env: OperationsEnv, source?: "relay"): void {
+export function requireDeliveryEnabled(
+  env: OperationsEnv,
+  relay?: { credentialId: string; type: string },
+): void {
   if (
     !publicOperationEnabled(env, "PUBLIC_DELIVERY_ENABLED") ||
-    (source === "relay" && isPublicTrialResume(env))
+    (relay !== undefined && !trialAllowsRelay(env, relay.credentialId, relay.type))
   ) {
     throw new ProblemError(503, "Service Unavailable", undefined, { "Retry-After": "900" });
   }
+}
+
+export function trialAllowsRelay(env: OperationsEnv, credentialId: string, type: string): boolean {
+  const trial = publicTrial(env);
+  if (trial === undefined || !("resume" in trial)) return true;
+  return (
+    trial.until > Date.now() &&
+    trial.relayId === credentialId &&
+    (type === "mention" || type === "reply")
+  );
 }
 
 export function isPublicTrialResume(env: OperationsEnv): boolean {

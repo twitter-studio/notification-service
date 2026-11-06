@@ -122,9 +122,9 @@ export function registerNotifications(
   sendBudgetMs: number,
 ) {
   app.openapi(route, async (c) => {
-    requireDeliveryEnabled(c.env, "relay");
     const credential = c.get("relayCredential");
     const body = c.req.valid("json");
+    requireDeliveryEnabled(c.env, { credentialId: credential.id, type: body.type });
     if (EVENT_TYPES_WITHOUT_POST.has(body.type) === (body.post_id !== undefined))
       throw new ProblemError(422, "Unprocessable Content", "The post ID does not match the type.");
     const now = new Date();

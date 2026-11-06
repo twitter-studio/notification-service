@@ -42,6 +42,10 @@ on:
         description: 前回登録した端末1台で所有確認とテスト通知だけを再試験する
         type: boolean
         default: false
+      trial_relay_credential_id:
+        description: 実X再試験で許可する公開用の中継資格情報ID
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -63,6 +67,7 @@ env:
   PUBLIC_TRIAL_UNTIL: ${{ inputs.trial_until }}
   PUBLIC_TRIAL_INVITE_HASH: ${{ inputs.trial_invite_hash }}
   PUBLIC_TRIAL_RESUME: ${{ inputs.trial_resume }}
+  PUBLIC_TRIAL_RELAY_CREDENTIAL_ID: ${{ inputs.trial_relay_credential_id }}
 
 jobs:
   gate:
