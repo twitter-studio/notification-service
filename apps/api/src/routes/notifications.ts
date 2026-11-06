@@ -18,6 +18,7 @@ import {
   EVENT_TYPES,
   EVENT_TYPES_WITHOUT_POST,
   eventKeyOf,
+  NotificationPreview,
   NotificationRouteID,
   notificationPayload,
 } from "../notifications/payload";
@@ -30,7 +31,7 @@ import { recordTelemetry } from "../telemetry";
 import { commonProblems, problemResponse, retryableProblemResponse } from "./openapi";
 
 // 利用者の Worker からイベントを受け付け、そのアカウントの端末へ送る (設計書 §4、API-003、ADR-0009)。
-// 送り先のアカウントは、中継の資格情報だけで決める。本文で、アカウント、X の ID、トークン、文、URL を受けない。
+// 送り先のアカウントは、中継の資格情報だけで決める。
 
 /** 送り手とサーバーの時計のずれとして許す幅。 */
 export const EVENT_CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -66,6 +67,9 @@ const EventSchema = z
       .openapi({ description: "ツイートの ID。follow 以外では要り、follow では送らない" }),
     route_id: NotificationRouteID.optional().openapi({
       description: "アプリ内のアカウントを選ぶための識別子。端末への配送先は変えない",
+    }),
+    preview: NotificationPreview.optional().openapi({
+      description: "メンションと返信のみ。投稿者の @ を除いたユーザー名と本文の抜粋",
     }),
     occurred_at: z.iso
       .datetime()
@@ -131,6 +135,8 @@ export function registerNotifications(
     requireDeliveryEnabled(c.env, { credentialId: credential.id, type: body.type });
     if (EVENT_TYPES_WITHOUT_POST.has(body.type) === (body.post_id !== undefined))
       throw new ProblemError(422, "Unprocessable Content", "The post ID does not match the type.");
+    if (body.preview !== undefined && body.type !== "mention" && body.type !== "reply")
+      throw new ProblemError(422, "Unprocessable Content", "The preview does not match the type.");
     const now = new Date();
     const occurredAt = Date.parse(body.occurred_at);
     if (
@@ -221,6 +227,7 @@ export function registerNotifications(
           type: body.type,
           postId: body.post_id,
           routeId: body.route_id,
+          preview: body.preview,
         }),
       };
       for (const device of devices) {

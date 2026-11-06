@@ -12,12 +12,25 @@ export type EventType = (typeof EVENT_TYPES)[number];
 export const NotificationRouteID = z.uuid().brand<"NotificationRouteID">();
 export type NotificationRouteID = z.infer<typeof NotificationRouteID>;
 
+export const PreviewHandle = z.string().regex(/^[A-Za-z0-9_]{1,15}$/);
+export const PreviewExcerpt = z
+  .string()
+  .min(1)
+  .max(280)
+  .refine((value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Bidi_Control}]/u.test(value));
+export const NotificationPreview = z.strictObject({
+  author: PreviewHandle,
+  excerpt: PreviewExcerpt,
+});
+type NotificationPreview = z.infer<typeof NotificationPreview>;
+
 export type RelayEvent = {
   eventId: string;
   type: EventType;
   /** ツイートの ID (数字だけ)。アプリは、これで X の決まった画面だけを開く。 */
   postId?: string | undefined;
   routeId?: NotificationRouteID | undefined;
+  preview?: NotificationPreview | undefined;
 };
 
 /** ツイートを指さない種類。これらは `post_id` を受けない (ほかの種類は、`post_id` が要る)。 */
@@ -50,20 +63,28 @@ export type OutgoingNotification = {
   payload: NotificationPayload;
 };
 
+export const NotificationAlert = z.union([
+  z.strictObject({ "loc-key": z.literal("You have a new notification.") }),
+  z.strictObject({ title: z.string().regex(/^@[A-Za-z0-9_]{1,15}$/), body: PreviewExcerpt }),
+]);
+
 export type NotificationPayload = {
-  aps: { alert: { "loc-key": "You have a new notification." }; sound: "default" };
+  aps: { alert: z.infer<typeof NotificationAlert>; sound: "default" };
   event_type: EventType | "test";
   post_id?: string;
   route_id?: NotificationRouteID;
 };
 
-/**
- * 通知の中身。既定で中身を運ばない一般的な文にする (ADR-0001 §4)。文はアプリの訳 (loc-key) で出し、送り手の文や URL は
- * 入れない (送り手が、ほかのアプリや運営を装った文を出せないように)。アプリは `post_id` を確かめてから開く。
- */
 export function notificationPayload(event: RelayEvent): NotificationPayload {
+  const preview = event.type === "mention" || event.type === "reply" ? event.preview : undefined;
   return {
-    aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
+    aps: {
+      alert:
+        preview === undefined
+          ? { "loc-key": "You have a new notification." }
+          : { title: `@${preview.author}`, body: preview.excerpt },
+      sound: "default",
+    },
     event_type: event.type,
     ...(event.postId === undefined ? {} : { post_id: event.postId }),
     ...(event.routeId === undefined ? {} : { route_id: event.routeId }),

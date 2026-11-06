@@ -500,6 +500,26 @@
             "format": "uuid",
             "description": "アプリ内のアカウントを選ぶための識別子。端末への配送先は変えない"
           },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "author": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_]{1,15}$"
+              },
+              "excerpt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 280
+              }
+            },
+            "required": [
+              "author",
+              "excerpt"
+            ],
+            "additionalProperties": false,
+            "description": "メンションと返信のみ。投稿者の @ を除いたユーザー名と本文の抜粋"
+          },
           "occurred_at": {
             "type": "string",
             "format": "date-time",

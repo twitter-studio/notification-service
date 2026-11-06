@@ -121,6 +121,27 @@ async function consume(gateway: ApnsPushGateway, body: unknown, attempts = 1) {
 }
 
 describe("APNs の遅延再送", () => {
+  it("投稿者と抜粋を含む通知を Queue から再送する", async () => {
+    const account = await accountWithDevice();
+    const test = await setup(429);
+    const outgoing = notification();
+    outgoing.payload = notificationPayload({
+      eventId: "preview",
+      type: "reply",
+      postId: "123",
+      preview: { author: "example", excerpt: "検証用のツイート" },
+    });
+    expect(
+      await test.gateway.push(account.target, outgoing, {
+        signal: new AbortController().signal,
+      }),
+    ).toEqual({ kind: "queued" });
+    await consume(test.gateway, test.jobs[0], 1);
+    expect(test.send).toHaveBeenCalledTimes(2);
+    for (const [, init] of test.send.mock.calls) {
+      expect(JSON.parse(String(init?.body))).toEqual(outgoing.payload);
+    }
+  });
   it.each([429, 503])(
     "%s の自動 Queue 投入・再送・打ち切りを識別子なしで集計できる",
     async (status) => {
