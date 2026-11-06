@@ -616,6 +616,76 @@ test("公開productionは閉鎖したまま許可ビルドを更新し、配置�
   assert.equal(f.count(), 1);
 });
 
+test("公開productionは端末の移行中に新旧2ビルドを受け付け、移行後に旧版を外せる", async () => {
+  const f = fixture({
+    publicProduction: true,
+    mode: "open",
+    trial: { PUBLIC_BUILD_OVERLAP: "2,1" },
+    mutate(url, settings) {
+      if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
+      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["1"] });
+    },
+  });
+  assert.deepEqual(
+    JSON.parse(deploymentConfig(f.env, f).config.vars.APP_ATTEST_POLICY).bundleVersions,
+    ["2", "1"],
+  );
+  assert.equal((await executeDeployment(f.env, f)).status, "public_production_open_deployed");
+
+  const cleanup = fixture({
+    publicProduction: true,
+    mode: "open",
+    mutate(url, settings) {
+      if (!url.pathname.includes("/versions/") || cleanup.count() !== 0) return;
+      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["2", "1"] });
+    },
+  });
+  assert.equal(
+    (await executeDeployment(cleanup.env, cleanup)).status,
+    "public_production_open_deployed",
+  );
+
+  for (const overlap of ["2,2", "2,1,3", "2,01", "3,1"])
+    assert.throws(() => deploymentConfig({ ...f.env, PUBLIC_BUILD_OVERLAP: overlap }, f));
+
+  const invalid = fixture({
+    publicProduction: true,
+    mode: "open",
+    trial: { PUBLIC_BUILD_OVERLAP: "2,3" },
+    mutate(url, settings) {
+      if (!url.pathname.includes("/versions/") || invalid.count() !== 0) return;
+      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["1"] });
+    },
+  });
+  await assert.rejects(executeDeployment(invalid.env, invalid));
+  assert.equal(invalid.count(), 0);
+});
+
+test("公開productionの緊急停止は移行中の新旧ビルドを維持し、新しいビルドは追加しない", async () => {
+  for (const active of [["2", "1"], ["1"]]) {
+    const f = fixture({
+      publicProduction: true,
+      mode: "stop",
+      trial: { PUBLIC_BUILD_OVERLAP: "2,1" },
+      mutate(url, settings) {
+        if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
+        const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+        binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: active });
+      },
+    });
+    if (active.length === 2) {
+      assert.equal((await executeDeployment(f.env, f)).status, "public_production_stop_deployed");
+      assert.equal(f.count(), 1);
+    } else {
+      await assert.rejects(executeDeployment(f.env, f));
+      assert.equal(f.count(), 0);
+    }
+  }
+});
+
 test("公開productionの許可ビルド更新はApp IDの相違や配置後の旧ビルドを拒否する", async () => {
   for (const after of [false, true]) {
     const f = fixture({
