@@ -53,7 +53,7 @@ on:
         type: string
         required: false
       build_overlap:
-        description: 端末を順に更新する場合の新旧ビルド（新,旧）
+        description: 端末を順に更新する場合のビルド（新,旧 または 新,旧,旧）
         type: string
         required: false
 

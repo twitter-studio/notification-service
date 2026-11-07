@@ -20,6 +20,12 @@ const publicBootstrap = "PUBLIC_PRODUCTION_BOOTSTRAP";
 const publicSwitches = ["PUBLIC_ENROLLMENT_ENABLED", "PUBLIC_DELIVERY_ENABLED"];
 const directory = resolve(import.meta.dirname, "..");
 const name = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
+const buildNumber = z.string().regex(/^[1-9][0-9]{0,8}$/);
+const overlappingBuilds = z
+  .array(buildNumber)
+  .min(2)
+  .max(3)
+  .refine((versions) => new Set(versions).size === versions.length);
 const Inputs = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
   CF_WORKER_SUBDOMAIN: name,
@@ -88,18 +94,13 @@ export function deploymentConfig(
       config.limits = { cpu_ms: 1000 };
       for (const limit of config.ratelimits)
         limit.namespace_id = String(Number(limit.namespace_id) + (publicProduction ? 200 : 100));
-      const bundleVersion = z
-        .string()
-        .regex(/^[1-9][0-9]{0,8}$/)
-        .parse(env.PROD_BUNDLE_VERSION);
+      const bundleVersion = buildNumber.parse(env.PROD_BUNDLE_VERSION);
       const bundleVersions = [bundleVersion];
       if (env.PUBLIC_BUILD_OVERLAP) {
-        const [next, previous] = z
-          .tuple([z.literal(bundleVersion), z.string().regex(/^[1-9][0-9]{0,8}$/)])
-          .parse(env.PUBLIC_BUILD_OVERLAP.split(","));
-        if (!publicProduction || publicDeploymentMode(env) === "closed" || next === previous)
+        const [next, ...previous] = overlappingBuilds.parse(env.PUBLIC_BUILD_OVERLAP.split(","));
+        if (!publicProduction || publicDeploymentMode(env) === "closed" || next !== bundleVersion)
           throw new DeploymentFailure();
-        bundleVersions.push(previous);
+        bundleVersions.push(...previous);
       }
       const keyId = publicProduction ? "production" : "prod-verification";
       const keyChecks = z
@@ -248,16 +249,16 @@ export function checkSnapshot(
           environment: z.literal(policy.environment),
           appId: z.literal(policy.appId),
           bundleVersions: z
-            .array(z.string().regex(/^[1-9][0-9]{0,8}$/))
+            .array(buildNumber)
             .min(1)
-            .max(2)
+            .max(3)
             .refine((versions) => new Set(versions).size === versions.length),
         })
         .parse(JSON.parse(current.text));
-      if (policy.bundleVersions.length === 2) {
+      if (policy.bundleVersions.length > 1) {
         const buildsToKeep =
           config.vars.PUBLIC_ENROLLMENT_ENABLED === "true"
-            ? [policy.bundleVersions[1]]
+            ? policy.bundleVersions.slice(1)
             : policy.bundleVersions;
         if (!buildsToKeep.every((version) => currentPolicy.bundleVersions.includes(version)))
           throw new DeploymentFailure();

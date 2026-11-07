@@ -647,7 +647,7 @@ test("公開productionは端末の移行中に新旧2ビルドを受け付け、
     "public_production_open_deployed",
   );
 
-  for (const overlap of ["2,2", "2,1,3", "2,01", "3,1"])
+  for (const overlap of ["2,2", "2,1,1", "2,1,3,4", "2,01", "3,1"])
     assert.throws(() => deploymentConfig({ ...f.env, PUBLIC_BUILD_OVERLAP: overlap }, f));
 
   const invalid = fixture({
@@ -662,6 +662,31 @@ test("公開productionは端末の移行中に新旧2ビルドを受け付け、
   });
   await assert.rejects(executeDeployment(invalid.env, invalid));
   assert.equal(invalid.count(), 0);
+});
+
+test("公開productionで現行の2ビルドを維持して新しいビルドを追加する", async () => {
+  for (const active of [["1", "3"], ["1"]]) {
+    const f = fixture({
+      publicProduction: true,
+      mode: "open",
+      trial: { PUBLIC_BUILD_OVERLAP: "2,1,3" },
+      mutate(url, settings) {
+        if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
+        const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+        binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: active });
+      },
+    });
+    if (active.length === 2) {
+      assert.deepEqual(
+        JSON.parse(deploymentConfig(f.env, f).config.vars.APP_ATTEST_POLICY).bundleVersions,
+        ["2", "1", "3"],
+      );
+      assert.equal((await executeDeployment(f.env, f)).status, "public_production_open_deployed");
+    } else {
+      await assert.rejects(executeDeployment(f.env, f));
+      assert.equal(f.count(), 0);
+    }
+  }
 });
 
 test("公開productionの緊急停止は移行中の新旧ビルドを維持し、新しいビルドは追加しない", async () => {
