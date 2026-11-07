@@ -36,7 +36,6 @@ const productionEnv = {
   SANDBOX_DEPLOY_ENABLED: "false",
   PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "true",
   WORKER_NAME: "notification-service-prod-verification",
-  PROD_BUNDLE_VERSION: "1",
   PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
     fingerprint: "0123456789abcdef",
     keys: { "prod-verification": "fedcba9876543210" },
@@ -47,7 +46,6 @@ const publicEnv = {
   PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "false",
   PUBLIC_PRODUCTION_DEPLOY_ENABLED: "true",
   WORKER_NAME: "notification-service-production",
-  PROD_BUNDLE_VERSION: "2",
   VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: productionEnv.PROD_DEVICE_TOKEN_KEY_CHECKS,
   PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
     fingerprint: "1111222233334444",
@@ -70,7 +68,9 @@ function fixture({
     ? {
         ...publicEnv,
         ...trial,
-        ...(mode ? { PUBLIC_DEPLOY_MODE: mode, DEPLOY_CONFIRMATION: `deploy-${mode}:${sha}` } : {}),
+        ...(mode && mode !== "closed"
+          ? { PUBLIC_DEPLOY_MODE: mode, DEPLOY_CONFIRMATION: `deploy-${mode}:${sha}` }
+          : {}),
       }
     : productionVerification
       ? productionEnv
@@ -287,7 +287,6 @@ test("production検証ではsandboxの資源・鍵の確認値・承認を使わ
   const { config } = deploymentConfig(f.env, f);
   assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY), {
     appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
-    bundleVersions: ["1"],
     environment: "production",
     mode: "required_with_invite",
   });
@@ -433,17 +432,6 @@ test("KCVの安全な追加は配置前に許可し、配置後は完全一致�
   assert.doesNotThrow(() => checkSnapshot(f.snapshot, next, { before: true }));
   assert.throws(() => checkSnapshot(f.snapshot, next));
 });
-test("App Attestの許可バージョン追加は配置前に許可する", () => {
-  const f = fixture();
-  const { config } = deploymentConfig(env);
-  const next = structuredClone(config);
-  const policy = JSON.parse(next.vars.APP_ATTEST_POLICY);
-  policy.bundleVersions.push("2");
-  next.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
-  assert.doesNotThrow(() => checkSnapshot(f.snapshot, next, { before: true }));
-  assert.throws(() => checkSnapshot(f.snapshot, next));
-});
-
 for (const [name, change] of [
   [
     "指紋鍵KCV変更",
@@ -491,12 +479,6 @@ for (const [name, change] of [
       policy.mode = "required";
     },
   ],
-  [
-    "既存バージョンの削除",
-    (policy) => {
-      policy.bundleVersions = ["other"];
-    },
-  ],
 ])
   test(`${name}は通常配置で許可しない`, () => {
     const f = fixture();
@@ -516,35 +498,6 @@ for (const id of ["bad key", "k".repeat(33)])
     config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(checks);
     assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
   });
-for (const version of ["x".repeat(129), ""])
-  test(`実行時に読めないバージョンの追加を拒否する ${version.length}`, () => {
-    const f = fixture();
-    const { config } = deploymentConfig(env);
-    const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
-    policy.bundleVersions.push(version);
-    config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
-    assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
-  });
-test("100件を超える許可バージョンを配置しない", () => {
-  const f = fixture();
-  const { config } = deploymentConfig(env);
-  const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
-  policy.bundleVersions.push(...Array.from({ length: 100 }, (_, i) => String(i + 2)));
-  config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
-  assert.throws(() => checkSnapshot(f.snapshot, config, { before: true }));
-});
-test("上限内の鍵IDとバージョン追加を許可する", () => {
-  const f = fixture();
-  const { config } = deploymentConfig(env);
-  const checks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
-  checks.keys["k".repeat(32)] = "1111111111111111";
-  config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(checks);
-  const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
-  policy.bundleVersions.push("x".repeat(128));
-  config.vars.APP_ATTEST_POLICY = JSON.stringify(policy);
-  assert.doesNotThrow(() => checkSnapshot(f.snapshot, config, { before: true }));
-});
-
 test("公開productionの初期配置は専用資源を使い、登録と配送を閉じる", async () => {
   const f = fixture({ publicProduction: true, bootstrap: true });
   const { config } = deploymentConfig(
@@ -565,7 +518,6 @@ test("公開productionの初期配置は専用資源を使い、登録と配送�
   );
   assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY), {
     appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
-    bundleVersions: ["2"],
     environment: "production",
     mode: "required",
   });
@@ -603,115 +555,26 @@ test("公開productionでは専用Environmentが無効、または検証Worker�
   assert.equal(f.count(), 0);
 });
 
-test("公開productionは閉鎖したまま許可ビルドを更新し、配置後に新しい値を確認する", async () => {
-  const f = fixture({
-    publicProduction: true,
-    mutate(url, settings) {
-      if (!url.pathname.endsWith("/settings") || f.count() !== 0) return;
-      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
-      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["1"] });
-    },
-  });
-  assert.equal((await executeDeployment(f.env, f)).status, "public_production_closed_deployed");
-  assert.equal(f.count(), 1);
-});
-
-test("公開productionは端末の移行中に新旧2ビルドを受け付け、移行後に旧版を外せる", async () => {
-  const f = fixture({
-    publicProduction: true,
-    mode: "open",
-    trial: { PUBLIC_BUILD_OVERLAP: "2,1" },
-    mutate(url, settings) {
-      if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
-      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
-      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["1"] });
-    },
-  });
-  assert.deepEqual(
-    JSON.parse(deploymentConfig(f.env, f).config.vars.APP_ATTEST_POLICY).bundleVersions,
-    ["2", "1"],
-  );
-  assert.equal((await executeDeployment(f.env, f)).status, "public_production_open_deployed");
-
-  const cleanup = fixture({
-    publicProduction: true,
-    mode: "open",
-    mutate(url, settings) {
-      if (!url.pathname.includes("/versions/") || cleanup.count() !== 0) return;
-      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
-      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["2", "1"] });
-    },
-  });
-  assert.equal(
-    (await executeDeployment(cleanup.env, cleanup)).status,
-    "public_production_open_deployed",
-  );
-
-  for (const overlap of ["2,2", "2,1,1", "2,1,3,4", "2,01", "3,1"])
-    assert.throws(() => deploymentConfig({ ...f.env, PUBLIC_BUILD_OVERLAP: overlap }, f));
-
-  const invalid = fixture({
-    publicProduction: true,
-    mode: "open",
-    trial: { PUBLIC_BUILD_OVERLAP: "2,3" },
-    mutate(url, settings) {
-      if (!url.pathname.includes("/versions/") || invalid.count() !== 0) return;
-      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
-      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["1"] });
-    },
-  });
-  await assert.rejects(executeDeployment(invalid.env, invalid));
-  assert.equal(invalid.count(), 0);
-});
-
-test("公開productionで現行の2ビルドを維持して新しいビルドを追加する", async () => {
-  for (const active of [["1", "3"], ["1"]]) {
+for (const [mode, status] of [
+  ["closed", "public_production_closed_deployed"],
+  ["open", "public_production_open_deployed"],
+  ["stop", "public_production_stop_deployed"],
+])
+  test(`公開productionの${mode}配置で旧設定からビルド許可リストを外せる`, async () => {
     const f = fixture({
       publicProduction: true,
-      mode: "open",
-      trial: { PUBLIC_BUILD_OVERLAP: "2,1,3" },
+      mode,
       mutate(url, settings) {
-        if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
+        if (!url.pathname.match(/\/(settings|versions\/[^/]+)$/) || f.count() !== 0) return;
         const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
-        binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: active });
+        binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: ["7", "4"] });
       },
     });
-    if (active.length === 2) {
-      assert.deepEqual(
-        JSON.parse(deploymentConfig(f.env, f).config.vars.APP_ATTEST_POLICY).bundleVersions,
-        ["2", "1", "3"],
-      );
-      assert.equal((await executeDeployment(f.env, f)).status, "public_production_open_deployed");
-    } else {
-      await assert.rejects(executeDeployment(f.env, f));
-      assert.equal(f.count(), 0);
-    }
-  }
-});
+    assert.equal((await executeDeployment(f.env, f)).status, status);
+    assert.equal(f.count(), 1);
+  });
 
-test("公開productionの緊急停止は移行中の新旧ビルドを維持し、新しいビルドは追加しない", async () => {
-  for (const active of [["2", "1"], ["1"]]) {
-    const f = fixture({
-      publicProduction: true,
-      mode: "stop",
-      trial: { PUBLIC_BUILD_OVERLAP: "2,1" },
-      mutate(url, settings) {
-        if (!url.pathname.includes("/versions/") || f.count() !== 0) return;
-        const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
-        binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: active });
-      },
-    });
-    if (active.length === 2) {
-      assert.equal((await executeDeployment(f.env, f)).status, "public_production_stop_deployed");
-      assert.equal(f.count(), 1);
-    } else {
-      await assert.rejects(executeDeployment(f.env, f));
-      assert.equal(f.count(), 0);
-    }
-  }
-});
-
-test("公開productionの許可ビルド更新はApp IDの相違や配置後の旧ビルドを拒否する", async () => {
+test("公開productionはApp IDの相違や配置後の旧設定を拒否する", async () => {
   for (const after of [false, true]) {
     const f = fixture({
       publicProduction: true,

@@ -20,12 +20,6 @@ const publicBootstrap = "PUBLIC_PRODUCTION_BOOTSTRAP";
 const publicSwitches = ["PUBLIC_ENROLLMENT_ENABLED", "PUBLIC_DELIVERY_ENABLED"];
 const directory = resolve(import.meta.dirname, "..");
 const name = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
-const buildNumber = z.string().regex(/^[1-9][0-9]{0,8}$/);
-const overlappingBuilds = z
-  .array(buildNumber)
-  .min(2)
-  .max(3)
-  .refine((versions) => new Set(versions).size === versions.length);
 const Inputs = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
   CF_WORKER_SUBDOMAIN: name,
@@ -94,14 +88,6 @@ export function deploymentConfig(
       config.limits = { cpu_ms: 1000 };
       for (const limit of config.ratelimits)
         limit.namespace_id = String(Number(limit.namespace_id) + (publicProduction ? 200 : 100));
-      const bundleVersion = buildNumber.parse(env.PROD_BUNDLE_VERSION);
-      const bundleVersions = [bundleVersion];
-      if (env.PUBLIC_BUILD_OVERLAP) {
-        const [next, ...previous] = overlappingBuilds.parse(env.PUBLIC_BUILD_OVERLAP.split(","));
-        if (!publicProduction || publicDeploymentMode(env) === "closed" || next !== bundleVersion)
-          throw new DeploymentFailure();
-        bundleVersions.push(...previous);
-      }
       const keyId = publicProduction ? "production" : "prod-verification";
       const keyChecks = z
         .strictObject({
@@ -131,7 +117,6 @@ export function deploymentConfig(
         mode: publicProduction ? "required" : "required_with_invite",
         environment: "production",
         appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
-        bundleVersions,
       });
       if (publicProduction) {
         const enabled = String(publicDeploymentMode(env) === "open");
@@ -190,7 +175,12 @@ function checkSecrets(bindings, publicProduction) {
 export function checkSnapshot(
   snapshot,
   config,
-  { before = false, publicProduction = false, publicPreflight = false } = {},
+  {
+    before = false,
+    publicProduction = false,
+    publicPreflight = false,
+    attestPreflight = before || publicPreflight,
+  } = {},
 ) {
   const bindings = z
     .array(
@@ -241,45 +231,23 @@ export function checkSnapshot(
         !Object.entries(oldChecks.keys).every(([id, kcv]) => newChecks.keys[id] === kcv)
       )
         throw new DeploymentFailure();
-    } else if (publicProduction && publicPreflight && key === "APP_ATTEST_POLICY") {
-      const policy = JSON.parse(value);
-      const currentPolicy = z
+    } else if (attestPreflight && key === "APP_ATTEST_POLICY") {
+      const policy = z
         .strictObject({
-          mode: z.literal(policy.mode),
-          environment: z.literal(policy.environment),
-          appId: z.literal(policy.appId),
-          bundleVersions: z
-            .array(buildNumber)
-            .min(1)
-            .max(3)
-            .refine((versions) => new Set(versions).size === versions.length),
+          mode: z.enum(["invite_only", "required", "required_with_invite"]),
+          environment: z.enum(["development", "production"]),
+          appId: z.string().regex(/^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/),
         })
-        .parse(JSON.parse(current.text));
-      if (policy.bundleVersions.length > 1) {
-        const buildsToKeep =
-          config.vars.PUBLIC_ENROLLMENT_ENABLED === "true"
-            ? policy.bundleVersions.slice(1)
-            : policy.bundleVersions;
-        if (!buildsToKeep.every((version) => currentPolicy.bundleVersions.includes(version)))
-          throw new DeploymentFailure();
-      }
+        .parse(JSON.parse(value));
+      z.strictObject({
+        mode: z.literal(policy.mode),
+        environment: z.literal(policy.environment),
+        appId: z.literal(policy.appId),
+        bundleVersions: z.array(z.string().min(1).max(128)).min(1).max(100).optional(),
+      }).parse(JSON.parse(current.text));
     } else if (publicProduction && publicPreflight && publicSwitches.includes(key)) {
       z.enum(["true", "false"]).parse(current.text);
       if (config.vars.PUBLIC_TRIAL && current.text !== "false") throw new DeploymentFailure();
-    } else if (before && key === "APP_ATTEST_POLICY") {
-      const schema = z.strictObject({
-        mode: z.literal("invite_only"),
-        environment: z.literal("development"),
-        appId: z.string().regex(/^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/),
-        bundleVersions: z.array(z.string().min(1).max(128)).min(1).max(100),
-      });
-      const oldPolicy = schema.parse(JSON.parse(current.text));
-      const newPolicy = schema.parse(JSON.parse(value));
-      if (
-        oldPolicy.appId !== newPolicy.appId ||
-        !oldPolicy.bundleVersions.every((version) => newPolicy.bundleVersions.includes(version))
-      )
-        throw new DeploymentFailure();
     } else if (current.text !== value) throw new DeploymentFailure();
   }
   if (
@@ -424,7 +392,7 @@ export async function executeDeployment(
         throw new DeploymentFailure();
     }
     const settings =
-      publicProduction && (migration || publicMode === "open" || env.PUBLIC_BUILD_OVERLAP)
+      publicProduction && (migration || publicMode === "open")
         ? await versionSettings(singleActiveVersion(await stateApi(`${worker}/deployments`)))
         : await stateApi(`${worker}/settings`);
     const bootstrap =
@@ -457,6 +425,7 @@ export async function executeDeployment(
         before: !productionVerification && !publicProduction,
         publicProduction,
         publicPreflight: publicProduction,
+        attestPreflight: true,
       });
     }
     const details = await stateApi(queue);

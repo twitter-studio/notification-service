@@ -13,35 +13,27 @@ describe("Apple App Attestの検証", () => {
     expect(result.receipt).toEqual(test.receipt);
     expect(result.counter).toBe(0);
   });
-  it.each([
-    "challenge",
-    "key_id",
-    "app_id",
-    "environment",
-    "bundle_version",
-    "expired_receipt",
-  ] as const)("%sの不一致を拒む", async (kind) => {
-    const test = await fixture();
-    let input: Parameters<typeof test.verifier.attestation>[0] = test.input;
-    if (kind === "challenge") input = { ...input, clientData: new Uint8Array([1]) };
-    if (kind === "key_id") input = { ...input, keyId: new Uint8Array(32) };
-    if (kind === "app_id")
-      input = { ...input, policy: { ...input.policy, appId: "OTHERTEAM1.com.example.attest" } };
-    if (kind === "environment")
-      return expect(
-        test.verifier.attestation({
-          ...input,
-          policy: { ...input.policy, environment: "production" },
-        }),
-      ).rejects.toThrow(InvalidAppAttest);
-    if (kind === "bundle_version")
-      return expect(
-        test.verifier.attestation({ ...input, policy: { ...input.policy, bundleVersions: ["2"] } }),
-      ).rejects.toThrow(InvalidAppAttest);
-    if (kind === "expired_receipt")
-      input = { ...input, now: new Date(input.now.getTime() + 300001) };
-    await expect(test.verifier.attestation(input)).rejects.toThrow(InvalidAppAttest);
-  });
+  it.each(["challenge", "key_id", "app_id", "environment", "expired_receipt"] as const)(
+    "%sの不一致を拒む",
+    async (kind) => {
+      const test = await fixture();
+      let input: Parameters<typeof test.verifier.attestation>[0] = test.input;
+      if (kind === "challenge") input = { ...input, clientData: new Uint8Array([1]) };
+      if (kind === "key_id") input = { ...input, keyId: new Uint8Array(32) };
+      if (kind === "app_id")
+        input = { ...input, policy: { ...input.policy, appId: "OTHERTEAM1.com.example.attest" } };
+      if (kind === "environment")
+        return expect(
+          test.verifier.attestation({
+            ...input,
+            policy: { ...input.policy, environment: "production" },
+          }),
+        ).rejects.toThrow(InvalidAppAttest);
+      if (kind === "expired_receipt")
+        input = { ...input, now: new Date(input.now.getTime() + 300001) };
+      await expect(test.verifier.attestation(input)).rejects.toThrow(InvalidAppAttest);
+    },
+  );
   it("assertionの実署名と増加するcounterを確かめ、使い回しを拒む", async () => {
     const test = await fixture();
     const object = await test.assertion(1);
@@ -61,6 +53,26 @@ describe("Apple App Attestの検証", () => {
     ).rejects.toThrow(InvalidAppAttest);
   });
 });
+
+it.each([
+  ["4", 4],
+  ["9", 2],
+] as const)(
+  "同じproductionアプリのビルド%sを登録とセッション更新で受け付ける",
+  async (bundleVersion, category) => {
+    const test = await fixture({ environment: "production", bundleVersion, category });
+    expect((await test.verifier.attestation(test.input)).counter).toBe(0);
+    expect(
+      await test.verifier.assertion({
+        object: await test.assertion(1),
+        publicKey: test.point,
+        previousCounter: 0,
+        clientData: test.input.clientData,
+        policy: test.input.policy,
+      }),
+    ).toBe(1);
+  },
+);
 
 it.each([
   "certificate_signature",
@@ -117,12 +129,8 @@ it.each([0x40, 0xc0])(
   async (flags) => {
     const test = await fixture({ attestationFlags: flags });
     expect((await test.verifier.attestation(test.input)).counter).toBe(0);
-    await expect(
-      test.verifier.attestation({
-        ...test.input,
-        policy: { ...test.input.policy, bundleVersions: ["wrong"] },
-      }),
-    ).rejects.toThrow(InvalidAppAttest);
+    const invalid = await fixture({ attestationFlags: flags, category: 1 });
+    await expect(invalid.verifier.attestation(invalid.input)).rejects.toThrow(InvalidAppAttest);
   },
 );
 it.each([0x00, 0x80, 0xc0])("assertion flags=%iでも拡張と署名を検証する", async (flags) => {
@@ -136,13 +144,14 @@ it.each([0x00, 0x80, 0xc0])("assertion flags=%iでも拡張と署名を検証す
       policy: test.input.policy,
     }),
   ).toBe(1);
+  const invalid = await fixture({ assertionFlags: flags, category: 1 });
   await expect(
-    test.verifier.assertion({
-      object: await test.assertion(1),
-      publicKey: test.point,
+    invalid.verifier.assertion({
+      object: await invalid.assertion(1),
+      publicKey: invalid.point,
       previousCounter: 0,
-      clientData: test.input.clientData,
-      policy: { ...test.input.policy, bundleVersions: ["wrong"] },
+      clientData: invalid.input.clientData,
+      policy: invalid.input.policy,
     }),
   ).rejects.toThrow(InvalidAppAttest);
   await expect(

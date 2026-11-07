@@ -53,11 +53,11 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 
 1. 検証用Queueを保持24時間で作り、専用のD1と、外部入口を持たない初期Workerを用意する。初期Workerの平文変数は `PRODUCTION_VERIFICATION_BOOTSTRAP=true` だけとし、運営用の5つの秘密をCloudflareに登録する。Appleの鍵と登録用の秘密はGitHubのEnvironmentへコピーしない。
 2. `production-verification` と `production-verification-migrations` を作り、本人1名のrequired reviewer・main限定・管理者bypass禁止を設定する。資格情報を分け、migrationは対象D1のEdit、Worker配置は対象WorkerのEdit・対象アカウントのQueues管理・D1 Readに絞る。
-3. 両Environmentに `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_BUNDLE_VERSION`、`PROD_DEVICE_TOKEN_KEY_CHECKS` を設定する。build番号は配布物と同じ値にする。KCVには専用鍵の値を使い、`keys` の項目名を `prod-verification` とする。
+3. 両Environmentに `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_DEVICE_TOKEN_KEY_CHECKS` を設定する。KCVには専用鍵の値を使い、`keys` の項目名を `prod-verification` とする。
 4. `PRODUCTION_VERIFICATION_DEPLOY_ENABLED` は既定false。承認された作業中だけtrueにする。 `Production notification verification` をmainのCI成功SHAで起動し、初期migrationとWorker配置を順に別runで承認する。作業後は有効化変数をfalseへ戻す。
 5. Worker名、D1・Queueのbinding、App Attestのproduction設定、稼働版100%、Queue空、Cron、healthを照合する。最初の実機登録後は招待secretの削除を別途実施し、既存登録のセッション更新とsandboxの稼働状態を確認する。
 
-この手順は承認された初回の1ビルドに限る。配置済みWorkerとの設定照合は完全一致を要求する。別のbuild番号で試験をやり直す場合は、検証アカウントと旧配布物の扱いを確定し、設定差分と配置を改めてレビューする。
+試験に使う配布物は承認時に特定する。App Attest はアプリ ID、環境、配布区分と署名を検証する。
 
 ## 公開用productionを閉じた状態で準備する
 
@@ -65,7 +65,7 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 
 1. オーナーの承認後、専用D1とQueueを作り、外部の入口を持たず404だけを返す[初期Worker](../apps/api/public-bootstrap/wrangler.jsonc)を用意する。初期Workerの平文変数は `PUBLIC_PRODUCTION_BOOTSTRAP=true` のみ。APNs provider鍵、チャレンジ署名鍵、端末トークンの暗号鍵束と指紋鍵を、対象Workerのsecretに置く。公開用の端末トークン鍵とチャレンジ鍵は別途生成する。APNs鍵の選定と運用対象は承認記録に残す。
 2. GitHubの `production` と `production-migrations` を本人1名のrequired reviewer、main限定、管理者bypass禁止で設定する。配置とmigrationの資格情報を分ける。必要な権限は配置先Workerだけの編集、D1参照、Queue管理と、migration先D1の編集。migrationの停止照合には、公開WorkerとQueueを参照できる別の読み取り専用トークンを使い、`production-migrations` Environmentの `PUBLIC_WORKER_READ_TOKEN` に保存する。トークンの発行は対象と権限を確定してから別途承認する。配置前にCloudflareのWorker情報から公開URLを照合する。個別に絞れない権限は、発行前に許可範囲を記録する。
-3. 両Environmentの変数に `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_BUNDLE_VERSION`、`PROD_DEVICE_TOKEN_KEY_CHECKS` と `VERIFICATION_DEVICE_TOKEN_KEY_CHECKS` を指定する。公開用のKCVの鍵IDは `production`。検証用KCVは検証用Environmentの実値と照合する。KCVだけを変数に保存し、鍵をコピーしない。
+3. 両Environmentの変数に `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_DEVICE_TOKEN_KEY_CHECKS` と `VERIFICATION_DEVICE_TOKEN_KEY_CHECKS` を指定する。公開用のKCVの鍵IDは `production`。検証用KCVは検証用Environmentの実値と照合する。KCVだけを変数に保存し、鍵をコピーしない。
 4. リポジトリの `PUBLIC_PRODUCTION_DEPLOY_ENABLED` は通常false。作業中だけtrueにし、`Public production deployment` をmainのCI成功SHAで起動する。専用D1に初期migrationを適用した後、別runでWorkerを配置する。既存の公開環境にmigrationを当てる前には、別runで登録・配送を停止し、書き込み元とQueueの停止を照合する。Workflowも100%稼働中の単一版の両スイッチがfalseで試験枠がなく、専用Queueが空であることを読み取り確認する。停止構成でもセッション更新、削除、資格情報の操作、CronはD1へ書き込む。これらと互換性のないmigrationでは個別の停止手順と承認を先に用意する。初期migrationでは、初期Workerとproducer・consumerのない専用Queueを照合する。各runはオーナー本人がEnvironment承認を行う。
 5. `public_production_closed_deployed`、health 200、登録403、専用のbindingとQueue空を確認する。公開用のApp Attestは `required` と `production`、招待secretは存在しない。両スイッチはfalse。完了後は配置有効化変数をfalseに戻し、migration用の資格情報を整理する。
 
@@ -73,7 +73,7 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 
 ### 内部TestFlightの実機試験
 
-1. オーナーと対象ビルド、端末、終了時刻を確定する。`PROD_BUNDLE_VERSION` に配布後のビルド番号を指定する。32バイトの乱数をパディングなしBase64URLにした招待コードを保護ファイルに保存し、試験端末の操作者に渡す。
+1. オーナーと対象ビルド、端末、終了時刻を確定する。32バイトの乱数をパディングなしBase64URLにした招待コードを保護ファイルに保存し、試験端末の操作者に渡す。
 2. `Public production deployment` の `deploy` を `public_mode=closed` で起動し、`trial_until` に2時間以内のUTC終了時刻を指定する。`trial_invite_hash` には招待コードの文字列をSHA-256でハッシュし、パディングなしBase64URLにした値を渡す。オーナーが `production` Environment を承認する。Workflowは通常の登録・配送が閉じ、D1に登録がなく、Queueが空であることを確認してから配置する。
 3. `public_production_trial_deployed` を確認する。実機で招待コードを入力し、App Attest登録、端末所有確認、テスト通知を確認する。新規登録は1件だけ受け付ける。終了時刻を過ぎると、新規登録とAPNsへの新規送信は停止する。APNsが既に受理した通知は端末に届く場合がある。
 4. 試験が終わったらQueueが空であることを確認し、試験入力を空欄にして閉鎖配置を起動する。本人承認後、登録403、`PUBLIC_TRIAL` の解除、`PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` を確認する。
@@ -85,10 +85,10 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 ### 通常運用を開始する
 
 1. オーナーと対象ビルド、登録と配送を開始する範囲、停止担当を確定する。専用Queueが空で、以前の中継イベントが再送されないことを確認する。必要に応じて旧中継資格情報を取り消し、利用者側の購読とQueueも照合する。[利用開始と停止の手順](https://github.com/twitter-studio/notification-docs/blob/main/docs/operations/public-notification-lifecycle.md)
-2. `Public production deployment` を `operation=deploy`、`public_mode=open`、`confirmation=deploy-open:完全SHA` で起動する。試験用の入力は空にし、対象buildを `PROD_BUNDLE_VERSION` と照合する。オーナー本人が `production` Environment を承認する。
+2. `Public production deployment` を `operation=deploy`、`public_mode=open`、`confirmation=deploy-open:完全SHA` で起動する。試験用の入力は空にする。オーナー本人が `production` Environment を承認する。
 3. `public_production_open_deployed` を確認する。Workflowは配置後に登録・配送の設定が両方trueで、healthが200であることを照合する。登録入口には無効なチャレンジを送り、アプリから401が返ることを確認する。実際の登録、所有確認、配送は対象端末で別途確認する。終了後は `PUBLIC_PRODUCTION_DEPLOY_ENABLED=false` に戻す。
 
-端末を順に更新するときは、`production` Environment の `PROD_BUNDLE_VERSION` に新しい配布ビルド番号を設定し、Workflow の `build_overlap` 入力に新しい番号を先頭にして、新旧の番号をカンマで区切って指定する。承認前にすべての番号を照合する。旧ビルドは稼働中の許可リストにあるものを最大2つ指定できる。移行中に緊急停止するときも、稼働中の番号を同じ入力に指定すればセッション更新を維持できる。更新が済んだら `build_overlap` を空欄にして通常の保護付き配置を行う。
+ビルド許可リストを外した後、旧版の Workflow は稼働中の設定を事前照合できない。切り戻す場合は、現在の設定を照合できる保護付き配置を準備する。
 
 通常運用への配置runが失敗した場合は、稼働版と両スイッチを確認する。通常運用が反映されていて停止が必要なら、次の手順で緊急停止する。
 

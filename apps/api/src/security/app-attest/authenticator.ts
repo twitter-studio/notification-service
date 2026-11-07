@@ -4,13 +4,11 @@ import { bytes, cbor, equal, firstCbor, requireValid, sha256 } from "./data";
 export type AppAttestPolicy = {
   appId: string;
   environment: "development" | "production";
-  bundleVersions: readonly string[];
 };
 function extensions(data: Uint8Array, policy: AppAttestPolicy) {
   const map = z.map(z.string(), z.unknown()).parse(cbor(data));
-  const version = z.string().min(1).max(128).parse(map.get("apple_bundle_version_01"));
   const category = bytes.parse(map.get("apple_validation_category_01"));
-  requireValid(category.length === 4 && policy.bundleVersions.includes(version));
+  requireValid(category.length === 4);
   const value = new DataView(category.buffer).getUint32(0, true);
   requireValid(policy.environment === "development" ? value === 3 : value === 2 || value === 4);
 }
