@@ -19,7 +19,6 @@ import { createAppAttestVerifier } from "../../../src/security/app-attest/verifi
 export const policy = {
   appId: "TESTTEAM01.com.example.attest",
   environment: "development",
-  bundleVersions: ["1"],
 } as const;
 const name = (value: string) =>
   new RelativeDistinguishedNames({
@@ -74,6 +73,8 @@ async function issue(
 }
 export async function fixture(
   options: {
+    bundleVersion?: string;
+    category?: number;
     clientData?: Uint8Array;
     environment?: "development" | "production";
     attestationFlags?: number;
@@ -101,10 +102,10 @@ export async function fixture(
     );
   const ext = encode(
     new Map<string, unknown>([
-      ["apple_bundle_version_01", "1"],
+      ["apple_bundle_version_01", options.bundleVersion ?? "1"],
       [
         "apple_validation_category_01",
-        new Uint8Array([environment === "production" ? 4 : 3, 0, 0, 0]),
+        new Uint8Array([options.category ?? (environment === "production" ? 4 : 3), 0, 0, 0]),
       ],
     ]),
   );

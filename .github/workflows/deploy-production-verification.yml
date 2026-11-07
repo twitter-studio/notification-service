@@ -93,6 +93,5 @@ jobs:
           CF_QUEUE_ID: ${{ vars.CF_QUEUE_ID }}
           WORKER_NAME: ${{ vars.WORKER_NAME }}
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
-          PROD_BUNDLE_VERSION: ${{ vars.PROD_BUNDLE_VERSION }}
           PROD_DEVICE_TOKEN_KEY_CHECKS: ${{ vars.PROD_DEVICE_TOKEN_KEY_CHECKS }}
         run: node apps/api/scripts/deploy-sandbox.mjs production-verification

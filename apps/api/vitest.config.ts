@@ -29,7 +29,6 @@ export default defineConfig(async () => {
               mode: "invite_only",
               appId: "TESTTEAM01.com.example.attest",
               environment: "development",
-              bundleVersions: ["1"],
             }),
             QA_MIGRATIONS: qaMigrations,
             APNS_PROVIDER_KEYS: "",
