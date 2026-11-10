@@ -30,7 +30,6 @@ pnpm --filter @notification-service/api dev   # 手元で起動 (http://localhos
 
 APNs の実装と遅延再送は [ADR-0011](docs/adr/0011-apns-delivery.md)、実機での接続確認は [APNS-001 の記録](docs/verification/2026-11-04-apns-sandbox.md) を参照。オーナーの承認で sandbox 検証用の運営 API・D1・再送 Queue を配置した。[初期配置の記録](docs/verification/2026-11-04-sandbox-deployment.md) に、対象、費用、確認結果と残る実機検証を記す。
 
-
 ## セキュリティと運用資料
 
 報告方法は [SECURITY.md](SECURITY.md)、承認付き配置の定義と必要な設定は [ops/deployment.md](ops/deployment.md) を参照してください。追加の運営用資料へのリンクには、非公開リポジトリへの参照を含みます。公開コードから実サービスの利用登録やproduction運用を開始できるという意味ではありません。
