@@ -51,7 +51,6 @@ Status: Accepted / 2026-11-04
 - 秘密の値は、手元では `.dev.vars` (コミットしない) に置き、名前だけを `.dev.vars.example` に書く。テストでは、テストだけの鍵と確かめの値を `vitest.config.ts` で渡す。
 - 使わなくなった端末 (APNs が無効と返したもの、止めたもの) の暗号文を消す方針は、別の Issue で決める。
 
-
 ## App Attest receiptの保持
 
 [ADR-0014](0014-app-attest.md)で同じ暗号鍵束を独立したAAD用途に利用する。鍵を削除する前に、APNsトークンの旧暗号文に加え`installation_attestations.receipt_ciphertext`の`ar1.<鍵ID>.`も数え、行が残る鍵は削除しない。
