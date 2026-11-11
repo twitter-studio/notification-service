@@ -86,7 +86,8 @@ export function deploymentConfig(env, { publicProduction = false } = {}) {
       const sandboxChecks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
       const otherChecks = [sandboxChecks.fingerprint, ...Object.values(sandboxChecks.keys)];
       // 検証用の配置先は2026-11-12に廃止したが、その鍵 (鍵ID prod-verification) との照合は外さない。
-      // 廃止した検証用の鍵を公開用に使い回さないための守りで、KCVはproductionのEnvironmentの変数に残す。
+      // 廃止した鍵を公開用に使い回さないための守りで、KCVはproductionとproduction-migrationsの
+      // Environmentの変数に残す。
       const verificationChecks = z
         .strictObject({
           fingerprint: z.string().regex(/^[a-f0-9]{16}$/),

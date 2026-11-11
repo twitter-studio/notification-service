@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { checkSnapshot, deploymentConfig, executeDeployment } from "./deploy-sandbox.mjs";
+import { DeploymentFailure } from "./deployment-gate.mjs";
 
 const kind = "service",
   sha = "a".repeat(40),
@@ -501,6 +502,45 @@ test("公開productionでは専用Environmentが無効、または検証Worker�
       f,
     ),
   );
+  assert.equal(f.count(), 0);
+});
+
+test("公開productionは廃止した検証用の鍵の確認値がないか、公開用の鍵と重なれば配置しない", async () => {
+  const f = fixture({ publicProduction: true });
+  const retired = JSON.parse(publicEnv.VERIFICATION_DEVICE_TOKEN_KEY_CHECKS);
+  const retiredKey = retired.keys["prod-verification"];
+  const production = (fingerprint, key) =>
+    JSON.stringify({ fingerprint, keys: { production: key } });
+  for (const [overrides, error] of [
+    [{ VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: undefined }],
+    [{ VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: "" }],
+    [{ VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({ ...retired, keys: {} }) }],
+    [
+      {
+        VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+          ...retired,
+          keys: { production: retiredKey },
+        }),
+      },
+    ],
+    [
+      { PROD_DEVICE_TOKEN_KEY_CHECKS: production("1111222233334444", retiredKey) },
+      DeploymentFailure,
+    ],
+    [
+      { PROD_DEVICE_TOKEN_KEY_CHECKS: production("1111222233334444", retired.fingerprint) },
+      DeploymentFailure,
+    ],
+    [
+      { PROD_DEVICE_TOKEN_KEY_CHECKS: production(retiredKey, "5555666677778888") },
+      DeploymentFailure,
+    ],
+  ]) {
+    const env = { ...f.env, ...overrides };
+    if (error) assert.throws(() => deploymentConfig(env, f), error);
+    else assert.throws(() => deploymentConfig(env, f));
+    await assert.rejects(executeDeployment(env, f));
+  }
   assert.equal(f.count(), 0);
 });
 
