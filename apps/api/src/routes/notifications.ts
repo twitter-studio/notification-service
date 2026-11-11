@@ -22,6 +22,7 @@ import {
   NotificationPreview,
   NotificationRouteID,
   notificationPayload,
+  PREVIEW_EVENT_TYPES,
   SealedDmPreview,
 } from "../notifications/payload";
 import type { PushGateway, PushOutcome } from "../notifications/push";
@@ -72,7 +73,7 @@ const EventSchema = z
     }),
     preview: NotificationPreview.optional().openapi({
       description:
-        "メンション・返信・引用ツイート・リツイート・いいねのみ。通知を起こした公開アカウントの @ を除いたユーザー名と、公開ツイート本文の抜粋",
+        "メンション・返信・引用ツイート・リツイート・いいねのみ。通知を起こした公開アカウントの @ を除いたユーザー名と、公開ツイート本文の抜粋。任意で、同じ公開アカウントの表示名 (author_name) と、アイコンの URL (author_image。https://pbs.twimg.com/profile_images/ の URL で、クエリとフラグメントなし) を付けられる。アプリの通知拡張が、送った人の Communication Notifications に使う",
     }),
     dm_preview: SealedDmPreview.optional().openapi({
       description: "DM 専用の暗号文。アカウントルートとイベント ID に結び付け、端末で復号する",
@@ -141,7 +142,7 @@ export function registerNotifications(
     requireDeliveryEnabled(c.env, { credentialId: credential.id, type: body.type });
     if (EVENT_TYPES_WITHOUT_POST.has(body.type) === (body.post_id !== undefined))
       throw new ProblemError(422, "Unprocessable Content", "The post ID does not match the type.");
-    if (body.preview !== undefined && (body.type === "follow" || body.type === "dm"))
+    if (body.preview !== undefined && !PREVIEW_EVENT_TYPES.has(body.type))
       throw new ProblemError(422, "Unprocessable Content", "The preview does not match the type.");
     if (body.type === "dm" && body.route_id === undefined)
       throw new ProblemError(422, "Unprocessable Content", "A DM requires an account route.");

@@ -11,8 +11,10 @@ import {
   DmPreviewFallbackAlert,
   DmPreviewPayload,
   EVENT_TYPES,
+  NotificationActor,
   NotificationAlert,
   NotificationRouteID,
+  PREVIEW_EVENT_TYPES,
 } from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
@@ -35,10 +37,19 @@ const Payload = z
       .optional(),
     route_id: NotificationRouteID.optional(),
     dm_preview: DmPreviewPayload.optional(),
+    actor: NotificationActor.optional(),
   })
   .refine((payload) => {
     const hasPreview = payload.dm_preview !== undefined;
-    if (hasPreview !== (payload.aps["mutable-content"] === 1)) return false;
+    const hasActor = payload.actor !== undefined;
+    if ((hasPreview || hasActor) !== (payload.aps["mutable-content"] === 1)) return false;
+    if (hasActor)
+      return (
+        !hasPreview &&
+        PREVIEW_EVENT_TYPES.has(payload.event_type) &&
+        "title" in payload.aps.alert &&
+        payload.aps.alert.title === `@${payload.actor?.username}`
+      );
     if (payload.event_type !== "dm") return !hasPreview;
     return (
       payload.route_id !== undefined &&

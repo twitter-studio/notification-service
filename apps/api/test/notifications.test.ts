@@ -8,7 +8,12 @@ import {
 } from "@notification-service/db";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
-import { eventKeyOf, type OutgoingNotification } from "../src/notifications/payload";
+import {
+  eventKeyOf,
+  NotificationRouteID,
+  notificationPayload,
+  type OutgoingNotification,
+} from "../src/notifications/payload";
 import type { PushOutcome, PushTarget } from "../src/notifications/push";
 import { MAX_EVENT_AGE_MS, MAX_EVENTS_PER_DAY } from "../src/routes/notifications";
 import { loadDeviceTokenKeys, sealDeviceToken } from "../src/security/device-token";
@@ -103,15 +108,67 @@ describe("中継の受け付け", () => {
         target: { apnsToken: recipient.apnsToken },
         notification: {
           payload: {
-            aps: { alert: { title: "@example", body: preview.excerpt } },
+            aps: { alert: { title: "@example", body: preview.excerpt }, "mutable-content": 1 },
             event_type: type,
             post_id: event.post_id,
             route_id: routeID,
+            actor: { username: "example" },
           },
         },
       });
     },
   );
+
+  it("公開アカウントの表示名とアイコンを、通知拡張の送った人として中継する", async () => {
+    const { app, sent } = appWithPush();
+    const recipient = await accountWithDevice();
+    const image = "https://pbs.twimg.com/profile_images/1/example_normal.jpg";
+    const routeID = crypto.randomUUID();
+    const event = newEvent({
+      type: "like",
+      preview: {
+        author: "example",
+        excerpt: "検証用のツイート",
+        author_name: "Example Name",
+        author_image: image,
+      },
+      route_id: routeID,
+    });
+    const logs = ["log", "info", "warn", "error"].map((level) =>
+      vi.spyOn(console, level as "log").mockImplementation(() => {}),
+    );
+    expect((await relay(app, recipient.enrolled.relay_secret, event)).status).toBe(202);
+    expect(sent[0]?.notification.payload).toEqual({
+      aps: {
+        alert: { title: "@example", body: "検証用のツイート" },
+        sound: "default",
+        "mutable-content": 1,
+      },
+      event_type: "like",
+      post_id: event.post_id,
+      route_id: routeID,
+      actor: { username: "example", name: "Example Name", image },
+    });
+    const logged = JSON.stringify(logs.map((spy) => spy.mock.calls));
+    for (const value of ["Example Name", image, "検証用のツイート"])
+      expect(logged).not.toContain(value);
+  });
+
+  it("いちばん大きいプレビューでも、APNs の 4KB に収まる", () => {
+    const payload = notificationPayload({
+      eventId: "large",
+      type: "reply",
+      postId: "1234567890123456789",
+      routeId: NotificationRouteID.parse(crypto.randomUUID()),
+      preview: {
+        author: "a".repeat(15),
+        excerpt: "界".repeat(280),
+        author_name: "界".repeat(100),
+        author_image: `https://pbs.twimg.com/profile_images/${"1".repeat(19)}/${"a".repeat(470)}`,
+      },
+    });
+    expect(new TextEncoder().encode(JSON.stringify(payload)).length).toBeLessThanOrEqual(4096);
+  });
 
   it("DM の暗号文だけを受け付けて、定型文付きの通知として中継する", async () => {
     const { app, sent } = appWithPush();
@@ -161,6 +218,56 @@ describe("中継の受け付け", () => {
     ["reply", { author: "other account", excerpt: "preview" }],
     ["mention", { author: "example", excerpt: "hello\u202eworld" }],
     ["reply", { author: "example", excerpt: "界".repeat(281) }],
+    ["like", { author: "example", excerpt: "preview", author_name: "Exa\u202emple" }],
+    ["like", { author: "example", excerpt: "preview", author_name: "N".repeat(101) }],
+    ["like", { author: "example", excerpt: "preview", author_name: " padded" }],
+    [
+      "retweet",
+      {
+        author: "example",
+        excerpt: "preview",
+        author_image: "http://pbs.twimg.com/profile_images/1/a.jpg",
+      },
+    ],
+    [
+      "retweet",
+      {
+        author: "example",
+        excerpt: "preview",
+        author_image: "https://example.com/profile_images/1/a.jpg",
+      },
+    ],
+    [
+      "retweet",
+      { author: "example", excerpt: "preview", author_image: "https://pbs.twimg.com/media/a.jpg" },
+    ],
+    [
+      "retweet",
+      {
+        author: "example",
+        excerpt: "preview",
+        author_image: "https://pbs.twimg.com/profile_images/1/a.jpg?name=large",
+      },
+    ],
+    ["mention", { author: "example", excerpt: "preview", author_id: "123" }],
+    ["like", { author: "example", excerpt: "preview", author_name: "Exa\u2028mple" }],
+    ["like", { author: "example", excerpt: "line\u2029break" }],
+    [
+      "retweet",
+      {
+        author: "example",
+        excerpt: "preview",
+        author_image: "https://pbs.twimg.com/profile_images/1/a.jpg?",
+      },
+    ],
+    [
+      "retweet",
+      {
+        author: "example",
+        excerpt: "preview",
+        author_image: "https://pbs.twimg.com/profile_images/1/a.jpg#",
+      },
+    ],
   ])("不正なプレビューを持つ %s は送らない", async (type, preview) => {
     const { app, sent } = appWithPush();
     const recipient = await accountWithDevice();

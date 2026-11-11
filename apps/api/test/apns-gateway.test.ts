@@ -142,6 +142,64 @@ describe("APNs の遅延再送", () => {
       expect(JSON.parse(String(init?.body))).toEqual(outgoing.payload);
     }
   });
+  it("表示名とアイコン付きの送った人を Queue から再送する", async () => {
+    const account = await accountWithDevice();
+    const test = await setup(429);
+    const outgoing = notification();
+    outgoing.payload = notificationPayload({
+      eventId: "preview",
+      type: "like",
+      postId: "123",
+      preview: {
+        author: "example",
+        excerpt: "検証用のツイート",
+        author_name: "Example Name",
+        author_image: "https://pbs.twimg.com/profile_images/1/example_normal.jpg",
+      },
+    });
+    expect(
+      await test.gateway.push(account.target, outgoing, { signal: new AbortController().signal }),
+    ).toEqual({ kind: "queued" });
+    await consume(test.gateway, test.jobs[0], 1);
+    expect(test.send).toHaveBeenCalledTimes(2);
+    const [, retried] = test.send.mock.calls[1] ?? [];
+    expect(JSON.parse(String(retried?.body))).toEqual(outgoing.payload);
+  });
+
+  it.each([
+    [
+      "actor と DM の暗号文の両方がある",
+      { dm_preview: { event_id: `x2_${"A".repeat(43)}`, sealed: "A".repeat(40) } },
+    ],
+    [
+      "actor があるのに mutable-content がない",
+      { aps: { alert: { title: "@example", body: "検証" }, sound: "default" } },
+    ],
+    [
+      "題の @ユーザー名と actor が合わない",
+      { aps: { alert: { title: "@other", body: "検証" }, sound: "default", "mutable-content": 1 } },
+    ],
+    ["フォローに actor がある", { event_type: "follow", post_id: undefined }],
+    ["テストの通知に actor がある", { event_type: "test", post_id: undefined }],
+    ["actor も暗号文もないのに mutable-content がある", { actor: undefined }],
+  ])("%s 仕事は再送しない", async (_name, change) => {
+    const account = await accountWithDevice();
+    const test = await setup(429);
+    const outgoing = notification();
+    outgoing.payload = notificationPayload({
+      eventId: "preview",
+      type: "like",
+      postId: "123",
+      preview: { author: "example", excerpt: "検証" },
+    });
+    await test.gateway.push(account.target, outgoing, { signal: new AbortController().signal });
+    const job = JSON.parse(JSON.stringify(test.jobs[0]));
+    job.payload = JSON.parse(JSON.stringify({ ...job.payload, ...change }));
+    const { id, result } = await consume(test.gateway, job);
+    expect(result.explicitAcks).toEqual([id]);
+    expect(test.send).toHaveBeenCalledTimes(1);
+  });
+
   it("DM の暗号文と定型文を Queue から再送する", async () => {
     const account = await accountWithDevice();
     const test = await setup(429);
