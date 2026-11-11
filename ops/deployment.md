@@ -47,25 +47,13 @@ SQL・対象D1・旧コード互換性をレビューし、アプリ・中継・
 
 仕様の根拠: [GitHub Environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)、[Cloudflare権限](https://developers.cloudflare.com/workers/authorization/workers/)。
 
-## productionの実機検証用Worker
-
-対象は `notification-service-prod-verification` のWorkerとD1、`notification-apns-prod-verification` のQueueだけ。[検証計画](https://github.com/twitter-studio/notification-docs/blob/main/docs/operations/2026-11-05-qa003-production-plan.md)に沿って、初期リソースの作成・権限付与・秘密登録をそれぞれ承認後に実施する。
-
-1. 検証用Queueを保持24時間で作り、専用のD1と、外部入口を持たない初期Workerを用意する。初期Workerの平文変数は `PRODUCTION_VERIFICATION_BOOTSTRAP=true` だけとし、運営用の5つの秘密をCloudflareに登録する。Appleの鍵と登録用の秘密はGitHubのEnvironmentへコピーしない。
-2. `production-verification` と `production-verification-migrations` を作り、本人1名のrequired reviewer・main限定・管理者bypass禁止を設定する。資格情報を分け、migrationは対象D1のEdit、Worker配置は対象WorkerのEdit・対象アカウントのQueues管理・D1 Readに絞る。
-3. 両Environmentに `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_DEVICE_TOKEN_KEY_CHECKS` を設定する。KCVには専用鍵の値を使い、`keys` の項目名を `prod-verification` とする。
-4. `PRODUCTION_VERIFICATION_DEPLOY_ENABLED` は既定false。承認された作業中だけtrueにする。 `Production notification verification` をmainのCI成功SHAで起動し、初期migrationとWorker配置を順に別runで承認する。作業後は有効化変数をfalseへ戻す。
-5. Worker名、D1・Queueのbinding、App Attestのproduction設定、稼働版100%、Queue空、Cron、healthを照合する。最初の実機登録後は招待secretの削除を別途実施し、既存登録のセッション更新とsandboxの稼働状態を確認する。
-
-試験に使う配布物は承認時に特定する。App Attest はアプリ ID、環境、配布区分と署名を検証する。
-
 ## 公開用productionを閉じた状態で準備する
 
-対象は `notification-service-production` のWorkerとD1、`notification-apns-production` Queue。sandboxとproduction検証用の資源を再利用しない。最初のmigrationとWorkerの配置は登録・配送を閉じた状態で別々に行う。通常運用への切り替えは、初期配置後に別runで行う。
+対象は `notification-service-production` のWorkerとD1、`notification-apns-production` Queue。sandboxの資源を再利用しない。最初のmigrationとWorkerの配置は登録・配送を閉じた状態で別々に行う。通常運用への切り替えは、初期配置後に別runで行う。
 
 1. オーナーの承認後、専用D1とQueueを作り、外部の入口を持たず404だけを返す[初期Worker](../apps/api/public-bootstrap/wrangler.jsonc)を用意する。初期Workerの平文変数は `PUBLIC_PRODUCTION_BOOTSTRAP=true` のみ。APNs provider鍵、チャレンジ署名鍵、端末トークンの暗号鍵束と指紋鍵を、対象Workerのsecretに置く。公開用の端末トークン鍵とチャレンジ鍵は別途生成する。APNs鍵の選定と運用対象は承認記録に残す。
 2. GitHubの `production` と `production-migrations` を本人1名のrequired reviewer、main限定、管理者bypass禁止で設定する。配置とmigrationの資格情報を分ける。必要な権限は配置先Workerだけの編集、D1参照、Queue管理と、migration先D1の編集。migrationの停止照合には、公開WorkerとQueueを参照できる別の読み取り専用トークンを使い、`production-migrations` Environmentの `PUBLIC_WORKER_READ_TOKEN` に保存する。トークンの発行は対象と権限を確定してから別途承認する。配置前にCloudflareのWorker情報から公開URLを照合する。個別に絞れない権限は、発行前に許可範囲を記録する。
-3. 両Environmentの変数に `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_DEVICE_TOKEN_KEY_CHECKS` と `VERIFICATION_DEVICE_TOKEN_KEY_CHECKS` を指定する。公開用のKCVの鍵IDは `production`。検証用KCVは検証用Environmentの実値と照合する。KCVだけを変数に保存し、鍵をコピーしない。
+3. 両Environmentの変数に `CLOUDFLARE_ACCOUNT_ID`、`CF_WORKER_SUBDOMAIN`、`CF_QUEUE_ID`、`WORKER_NAME`、`D1_DATABASE_ID`、`PROD_DEVICE_TOKEN_KEY_CHECKS` と `VERIFICATION_DEVICE_TOKEN_KEY_CHECKS` を指定する。公開用のKCVの鍵IDは `production`。`VERIFICATION_DEVICE_TOKEN_KEY_CHECKS` は、2026-11-12に廃止したproductionの実機検証用の鍵のKCV（鍵ID `prod-verification`）。配置のたびに、公開用の鍵がsandboxの鍵や廃止した検証用の鍵と重ならないことを照合するため、検証用の環境を消した後も残し、値を変えない。KCVだけを変数に保存し、鍵をコピーしない。
 4. リポジトリの `PUBLIC_PRODUCTION_DEPLOY_ENABLED` は通常false。作業中だけtrueにし、`Public production deployment` をmainのCI成功SHAで起動する。専用D1に初期migrationを適用した後、別runでWorkerを配置する。既存の公開環境にmigrationを当てる前には、別runで登録・配送を停止し、書き込み元とQueueの停止を照合する。Workflowも100%稼働中の単一版の両スイッチがfalseで試験枠がなく、専用Queueが空であることを読み取り確認する。停止構成でもセッション更新、削除、資格情報の操作、CronはD1へ書き込む。これらと互換性のないmigrationでは個別の停止手順と承認を先に用意する。初期migrationでは、初期Workerとproducer・consumerのない専用Queueを照合する。各runはオーナー本人がEnvironment承認を行う。
 5. `public_production_closed_deployed`、health 200、登録403、専用のbindingとQueue空を確認する。公開用のApp Attestは `required` と `production`、招待secretは存在しない。両スイッチはfalse。完了後は配置有効化変数をfalseに戻し、migration用の資格情報を整理する。
 

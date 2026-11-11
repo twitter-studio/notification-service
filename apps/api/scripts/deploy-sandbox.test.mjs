@@ -31,22 +31,15 @@ const env = {
   X_USER_ID: "123",
   RELAY_URL: "https://relay.example.invalid",
 };
-const productionEnv = {
+const publicEnv = {
   ...env,
   SANDBOX_DEPLOY_ENABLED: "false",
-  PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "true",
-  WORKER_NAME: "notification-service-prod-verification",
-  PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+  PUBLIC_PRODUCTION_DEPLOY_ENABLED: "true",
+  WORKER_NAME: "notification-service-production",
+  VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
     fingerprint: "0123456789abcdef",
     keys: { "prod-verification": "fedcba9876543210" },
   }),
-};
-const publicEnv = {
-  ...productionEnv,
-  PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "false",
-  PUBLIC_PRODUCTION_DEPLOY_ENABLED: "true",
-  WORKER_NAME: "notification-service-production",
-  VERIFICATION_DEVICE_TOKEN_KEY_CHECKS: productionEnv.PROD_DEVICE_TOKEN_KEY_CHECKS,
   PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
     fingerprint: "1111222233334444",
     keys: { production: "5555666677778888" },
@@ -57,7 +50,6 @@ function fixture({
   versionID = version,
   dirty = false,
   migrate = false,
-  productionVerification = false,
   publicProduction = false,
   bootstrap = false,
   edgeForbidden = false,
@@ -72,14 +64,8 @@ function fixture({
           ? { PUBLIC_DEPLOY_MODE: mode, DEPLOY_CONFIRMATION: `deploy-${mode}:${sha}` }
           : {}),
       }
-    : productionVerification
-      ? productionEnv
-      : env;
-  const target = publicProduction
-    ? "production"
-    : productionVerification
-      ? "production-verification"
-      : "sandbox";
+    : env;
+  const target = publicProduction ? "production" : "sandbox";
   const environment = migrate ? `${target}-migrations` : target;
   const selectedEnv = migrate
     ? {
@@ -91,7 +77,7 @@ function fixture({
         SCHEMA_CONFIRMED: "false",
       }
     : targetEnv;
-  const { config } = deploymentConfig(targetEnv, { productionVerification, publicProduction });
+  const { config } = deploymentConfig(targetEnv, { publicProduction });
   const secrets =
     kind === "worker"
       ? ["RELAY_TOKEN", "X_EVENT_ID_SECRET", "X_OAUTH2_CLIENT_SECRET"]
@@ -119,7 +105,6 @@ function fixture({
   return {
     snapshot,
     env: selectedEnv,
-    productionVerification,
     publicProduction,
     calls,
     count: () => mutations,
@@ -199,9 +184,7 @@ function fixture({
           if (bootstrap && mutations === 0) {
             result.bindings = result.bindings.filter((binding) => binding.type === "secret_text");
             result.bindings.push({
-              name: publicProduction
-                ? "PUBLIC_PRODUCTION_BOOTSTRAP"
-                : "PRODUCTION_VERIFICATION_BOOTSTRAP",
+              name: "PUBLIC_PRODUCTION_BOOTSTRAP",
               type: "plain_text",
               text: "true",
             });
@@ -282,70 +265,6 @@ function fixture({
     },
   };
 }
-test("production検証ではsandboxの資源・鍵の確認値・承認を使わない", async () => {
-  const f = fixture({ productionVerification: true, bootstrap: true });
-  const { config } = deploymentConfig(f.env, f);
-  assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY), {
-    appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
-    environment: "production",
-    mode: "required_with_invite",
-  });
-  assert.deepEqual(
-    config.ratelimits.map((limit) => limit.namespace_id),
-    ["1101", "1102", "1103", "1104"],
-  );
-  const sandbox = deploymentConfig(env).config;
-  const sandboxDatabase = /"database_id":\s*"([a-f0-9-]{36})"/.exec(
-    readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
-  )?.[1];
-  assert.ok(sandboxDatabase);
-  for (const overrides of [
-    { WORKER_NAME: env.WORKER_NAME },
-    { D1_DATABASE_ID: sandboxDatabase },
-    { PROD_DEVICE_TOKEN_KEY_CHECKS: sandbox.vars.DEVICE_TOKEN_KEY_CHECKS },
-  ])
-    assert.throws(() => deploymentConfig({ ...f.env, ...overrides }, f));
-  assert.equal((await executeDeployment(f.env, f)).status, "production_verification_deployed");
-  assert.ok(f.calls.some((url) => url.endsWith("/environments/production-verification")));
-  assert.ok(f.calls.every((url) => !url.includes("/environments/sandbox")));
-});
-test("production検証のD1 migrationは別の保護Environmentを使う", async () => {
-  const f = fixture({ productionVerification: true, migrate: true });
-  assert.equal((await executeDeployment(f.env, f)).status, "migration_applied");
-  assert.ok(
-    f.calls.some((url) => url.endsWith("/environments/production-verification-migrations")),
-  );
-});
-test("productionの有効化なしではsandboxの有効化があっても操作しない", async () => {
-  const f = fixture({ productionVerification: true });
-  await assert.rejects(
-    executeDeployment(
-      {
-        ...f.env,
-        SANDBOX_DEPLOY_ENABLED: "true",
-        PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "false",
-      },
-      f,
-    ),
-  );
-  assert.equal(f.calls.length, 0);
-});
-test("production検証のD1またはQueueが一致しなければ操作しない", async () => {
-  for (const path of ["/d1/database/", "/queues/"]) {
-    const f = fixture({
-      productionVerification: true,
-      bootstrap: true,
-      mutate: (url, data) => {
-        if (url.pathname.includes(path)) {
-          if ("name" in data) data.name = "notification-service";
-          if ("queue_name" in data) data.queue_name = "notification-apns-retries";
-        }
-      },
-    });
-    await assert.rejects(executeDeployment(f.env, f));
-    assert.equal(f.count(), 0);
-  }
-});
 test("停止中sandboxを更新し、稼働版・設定・Queue・Cron・公開入口を確認する", async () => {
   const f = fixture();
   const result = await executeDeployment(env, f);
@@ -526,6 +445,34 @@ test("公開productionの初期配置は専用資源を使い、登録と配送�
   assert.ok(f.calls.every((url) => !url.includes("prod-verification")));
 });
 
+test("公開productionはsandboxのWorker・D1・鍵の確認値・承認を使わない", async () => {
+  const f = fixture({ publicProduction: true, bootstrap: true });
+  const sandboxChecks = JSON.parse(deploymentConfig(env).config.vars.DEVICE_TOKEN_KEY_CHECKS);
+  const sandboxDatabase = /"database_id":\s*"([a-f0-9-]{36})"/.exec(
+    readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+  )?.[1];
+  assert.ok(sandboxDatabase);
+  for (const overrides of [
+    { WORKER_NAME: env.WORKER_NAME },
+    { D1_DATABASE_ID: sandboxDatabase },
+    {
+      PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+        fingerprint: sandboxChecks.fingerprint,
+        keys: { production: "5555666677778888" },
+      }),
+    },
+    {
+      PROD_DEVICE_TOKEN_KEY_CHECKS: JSON.stringify({
+        fingerprint: "1111222233334444",
+        keys: { production: Object.values(sandboxChecks.keys)[0] },
+      }),
+    },
+  ])
+    assert.throws(() => deploymentConfig({ ...f.env, ...overrides }, f));
+  assert.equal((await executeDeployment(f.env, f)).status, "public_production_closed_deployed");
+  assert.ok(f.calls.every((url) => !url.includes("/environments/sandbox")));
+});
+
 test("公開productionでは専用Environmentが無効、または検証Workerなら変更しない", async () => {
   const f = fixture({ publicProduction: true });
   await assert.rejects(
@@ -533,13 +480,15 @@ test("公開productionでは専用Environmentが無効、または検証Worker�
       {
         ...f.env,
         PUBLIC_PRODUCTION_DEPLOY_ENABLED: "false",
-        PRODUCTION_VERIFICATION_DEPLOY_ENABLED: "true",
+        SANDBOX_DEPLOY_ENABLED: "true",
       },
       f,
     ),
   );
   assert.equal(f.calls.length, 0);
-  assert.throws(() => deploymentConfig({ ...f.env, WORKER_NAME: productionEnv.WORKER_NAME }, f));
+  assert.throws(() =>
+    deploymentConfig({ ...f.env, WORKER_NAME: "notification-service-prod-verification" }, f),
+  );
   assert.throws(() =>
     deploymentConfig(
       {

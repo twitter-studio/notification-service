@@ -33,26 +33,14 @@ export function publicDeploymentMode(env) {
   return mode;
 }
 
-export function deploymentRequest(
-  env,
-  allowMigration = false,
-  productionVerification = false,
-  publicProduction = false,
-) {
+export function deploymentRequest(env, allowMigration = false, publicProduction = false) {
   const publicMode = publicProduction ? publicDeploymentMode(env) : "closed";
   if (publicProduction) publicTrial(env);
   const operation = env.DEPLOY_OPERATION;
-  if (productionVerification && publicProduction) throw new DeploymentFailure();
   const enabled = publicProduction
     ? env.PUBLIC_PRODUCTION_DEPLOY_ENABLED
-    : productionVerification
-      ? env.PRODUCTION_VERIFICATION_DEPLOY_ENABLED
-      : env.SANDBOX_DEPLOY_ENABLED;
-  const target = publicProduction
-    ? "production"
-    : productionVerification
-      ? "production-verification"
-      : "sandbox";
+    : env.SANDBOX_DEPLOY_ENABLED;
+  const target = publicProduction ? "production" : "sandbox";
   const confirmation = publicMode === "closed" ? operation : `deploy-${publicMode}`;
   if (
     env.GITHUB_ACTIONS !== "true" ||
@@ -84,11 +72,10 @@ export async function checkDeploymentGate(
     fetchImpl = fetch,
     allowMigration = false,
     requireApproval = false,
-    productionVerification = false,
     publicProduction = false,
   } = {},
 ) {
-  const request = deploymentRequest(env, allowMigration, productionVerification, publicProduction);
+  const request = deploymentRequest(env, allowMigration, publicProduction);
   if (!env.GH_TOKEN || /[\r\n]/.test(env.GH_TOKEN)) throw new DeploymentFailure();
   async function get(path) {
     const response = await fetchImpl(`https://api.github.com/repos/${request.repository}/${path}`, {
@@ -162,11 +149,9 @@ export async function checkDeploymentGate(
 }
 if (import.meta.main) {
   try {
-    const productionVerification = process.argv[2] === "production-verification";
     const publicProduction = process.argv[2] === "public-production";
     await checkDeploymentGate(process.env, {
-      allowMigration: publicProduction || productionVerification || process.argv[2] === "service",
-      productionVerification,
+      allowMigration: publicProduction || process.argv[2] === "service",
       publicProduction,
     });
     console.log("deployment_gate_ok");
