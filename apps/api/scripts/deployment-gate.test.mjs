@@ -228,7 +228,7 @@ test("公開の有効化と緊急停止には対象SHAと操作名を含む確�
       PUBLIC_DEPLOY_MODE: mode,
       DEPLOY_CONFIRMATION: `deploy-${mode}:${sha}`,
     });
-    assert.equal(deploymentRequest(env, true, false, true).environment, "production");
+    assert.equal(deploymentRequest(env, true, true).environment, "production");
     assert.throws(() => deploymentRequest(env, true), DeploymentFailure);
     for (const invalid of [
       { DEPLOY_CONFIRMATION: `deploy:${sha}` },
@@ -238,10 +238,7 @@ test("公開の有効化と緊急停止には対象SHAと操作名を含む確�
         PUBLIC_TRIAL_RESUME: "true",
       },
     ]) {
-      assert.throws(
-        () => deploymentRequest({ ...env, ...invalid }, true, false, true),
-        DeploymentFailure,
-      );
+      assert.throws(() => deploymentRequest({ ...env, ...invalid }, true, true), DeploymentFailure);
     }
   }
 });

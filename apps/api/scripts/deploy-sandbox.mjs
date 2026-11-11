@@ -12,8 +12,6 @@ import {
 } from "./deployment-gate.mjs";
 
 const KIND = "service";
-const verificationWorker = "notification-service-prod-verification";
-const verificationQueue = "notification-apns-prod-verification";
 const publicWorker = "notification-service-production";
 const publicQueue = "notification-apns-production";
 const publicBootstrap = "PUBLIC_PRODUCTION_BOOTSTRAP";
@@ -43,16 +41,8 @@ const Inputs = z.object({
         }),
       }),
 });
-export function deploymentConfig(
-  env,
-  { productionVerification = false, publicProduction = false } = {},
-) {
-  if (productionVerification && publicProduction) throw new DeploymentFailure();
-  const expectedWorker = publicProduction
-    ? publicWorker
-    : productionVerification
-      ? verificationWorker
-      : "notification-service";
+export function deploymentConfig(env, { publicProduction = false } = {}) {
+  const expectedWorker = publicProduction ? publicWorker : "notification-service";
   const input = Inputs.parse(env);
   const configPath = resolve(
     directory,
@@ -77,36 +67,35 @@ export function deploymentConfig(
       RELAY_URL: input.RELAY_URL,
     };
   } else {
-    if (productionVerification || publicProduction) {
+    if (publicProduction) {
       const database = config.d1_databases[0];
       if (input.D1_DATABASE_ID.toLowerCase() === database.database_id)
         throw new DeploymentFailure();
       database.database_name = expectedWorker;
-      const queueName = publicProduction ? publicQueue : verificationQueue;
-      config.queues.producers[0].queue = queueName;
-      config.queues.consumers[0].queue = queueName;
+      config.queues.producers[0].queue = publicQueue;
+      config.queues.consumers[0].queue = publicQueue;
       config.limits = { cpu_ms: 1000 };
       for (const limit of config.ratelimits)
-        limit.namespace_id = String(Number(limit.namespace_id) + (publicProduction ? 200 : 100));
-      const keyId = publicProduction ? "production" : "prod-verification";
+        limit.namespace_id = String(Number(limit.namespace_id) + 200);
       const keyChecks = z
         .strictObject({
           fingerprint: z.string().regex(/^[a-f0-9]{16}$/),
-          keys: z.strictObject({ [keyId]: z.string().regex(/^[a-f0-9]{16}$/) }),
+          keys: z.strictObject({ production: z.string().regex(/^[a-f0-9]{16}$/) }),
         })
         .parse(JSON.parse(env.PROD_DEVICE_TOKEN_KEY_CHECKS));
       const sandboxChecks = JSON.parse(config.vars.DEVICE_TOKEN_KEY_CHECKS);
       const otherChecks = [sandboxChecks.fingerprint, ...Object.values(sandboxChecks.keys)];
-      if (publicProduction) {
-        const verificationChecks = z
-          .strictObject({
-            fingerprint: z.string().regex(/^[a-f0-9]{16}$/),
-            keys: z.strictObject({ "prod-verification": z.string().regex(/^[a-f0-9]{16}$/) }),
-          })
-          .parse(JSON.parse(env.VERIFICATION_DEVICE_TOKEN_KEY_CHECKS));
-        otherChecks.push(verificationChecks.fingerprint, ...Object.values(verificationChecks.keys));
-      }
-      const checks = [keyChecks.fingerprint, keyChecks.keys[keyId]];
+      // 検証用の配置先は2026-11-12に廃止したが、その鍵 (鍵ID prod-verification) との照合は外さない。
+      // 廃止した鍵を公開用に使い回さないための守りで、KCVはproductionとproduction-migrationsの
+      // Environmentの変数に残す。
+      const verificationChecks = z
+        .strictObject({
+          fingerprint: z.string().regex(/^[a-f0-9]{16}$/),
+          keys: z.strictObject({ "prod-verification": z.string().regex(/^[a-f0-9]{16}$/) }),
+        })
+        .parse(JSON.parse(env.VERIFICATION_DEVICE_TOKEN_KEY_CHECKS));
+      otherChecks.push(verificationChecks.fingerprint, ...Object.values(verificationChecks.keys));
+      const checks = [keyChecks.fingerprint, keyChecks.keys.production];
       if (
         new Set(checks).size !== checks.length ||
         checks.some((value) => otherChecks.includes(value))
@@ -114,22 +103,19 @@ export function deploymentConfig(
         throw new DeploymentFailure();
       config.vars.DEVICE_TOKEN_KEY_CHECKS = JSON.stringify(keyChecks);
       config.vars.APP_ATTEST_POLICY = JSON.stringify({
-        mode: publicProduction ? "required" : "required_with_invite",
+        mode: "required",
         environment: "production",
         appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",
       });
-      if (publicProduction) {
-        const enabled = String(publicDeploymentMode(env) === "open");
-        for (const key of publicSwitches) config.vars[key] = enabled;
-        const trial = publicTrial(env);
-        if (trial) config.vars.PUBLIC_TRIAL = JSON.stringify(trial);
-      }
+      const enabled = String(publicDeploymentMode(env) === "open");
+      for (const key of publicSwitches) config.vars[key] = enabled;
+      const trial = publicTrial(env);
+      if (trial) config.vars.PUBLIC_TRIAL = JSON.stringify(trial);
     }
     config.d1_databases[0].database_id = input.D1_DATABASE_ID;
     config.d1_databases[0].migrations_dir = resolve(directory, "../../packages/db/migrations");
     const policy = JSON.parse(config.vars.APP_ATTEST_POLICY);
     if (
-      !productionVerification &&
       !publicProduction &&
       (policy.mode !== "invite_only" || policy.environment !== "development")
     )
@@ -306,7 +292,6 @@ export async function executeDeployment(
   {
     fetchImpl = fetch,
     runCommand = (command, args, options) => spawnSync(command, args, options),
-    productionVerification = false,
     publicProduction = false,
   } = {},
 ) {
@@ -314,13 +299,9 @@ export async function executeDeployment(
     fetchImpl,
     allowMigration: KIND === "service",
     requireApproval: true,
-    productionVerification,
     publicProduction,
   });
-  const { config, input, origin } = deploymentConfig(env, {
-    productionVerification,
-    publicProduction,
-  });
+  const { config, input, origin } = deploymentConfig(env, { publicProduction });
   const publicMode = publicProduction ? publicDeploymentMode(env) : "closed";
   if (!env.CLOUDFLARE_API_TOKEN || /[\r\n]/.test(env.CLOUDFLARE_API_TOKEN))
     throw new DeploymentFailure();
@@ -366,7 +347,7 @@ export async function executeDeployment(
   }
   const worker = `workers/scripts/${config.name}`;
   const queue = `queues/${input.CF_QUEUE_ID}`;
-  if (publicProduction || productionVerification || request.operation === "migrate") {
+  if (publicProduction || request.operation === "migrate") {
     const db = await api(`d1/database/${input.D1_DATABASE_ID}`);
     if (db.uuid !== input.D1_DATABASE_ID || db.name !== config.d1_databases[0].database_name)
       throw new DeploymentFailure();
@@ -396,11 +377,10 @@ export async function executeDeployment(
         ? await versionSettings(singleActiveVersion(await stateApi(`${worker}/deployments`)))
         : await stateApi(`${worker}/settings`);
     const bootstrap =
-      (productionVerification || publicProduction) &&
+      publicProduction &&
       settings.bindings?.some(
         (binding) =>
-          binding.name ===
-            (publicProduction ? publicBootstrap : "PRODUCTION_VERIFICATION_BOOTSTRAP") &&
+          binding.name === publicBootstrap &&
           binding.type === "plain_text" &&
           binding.text === "true",
       );
@@ -422,7 +402,7 @@ export async function executeDeployment(
       )
         throw new DeploymentFailure();
       checkSnapshot(settings, config, {
-        before: !productionVerification && !publicProduction,
+        before: !publicProduction,
         publicProduction,
         publicPreflight: publicProduction,
         attestPreflight: true,
@@ -574,9 +554,7 @@ export async function executeDeployment(
         ? config.vars.PUBLIC_TRIAL
           ? "public_production_trial_deployed"
           : `public_production_${publicMode}_deployed`
-        : productionVerification
-          ? "production_verification_deployed"
-          : "sandbox_deployed",
+        : "sandbox_deployed",
       sha: request.sha,
       version,
     };
@@ -589,7 +567,6 @@ if (import.meta.main) {
     console.log(
       JSON.stringify(
         await executeDeployment(process.env, {
-          productionVerification: process.argv[2] === "production-verification",
           publicProduction: process.argv[2] === "public-production",
         }),
       ),
