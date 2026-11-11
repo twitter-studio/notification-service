@@ -54,7 +54,7 @@ Status: Accepted / 2026-11-04
   - 形: `{"aps":{"alert":{"loc-key":"You have a new notification."},"sound":"default"},"event_type":"mention","post_id":"…"}`。
   - 送信元が端末のアプリで発行した経路の UUID を `route_id` として指定できる。運営 API は通知と再送にそのまま渡す。送り先は中継の資格情報から決める。既存の送信元は引き続き `route_id` を省略できる。
   - プレビューがある場合、API が見出しを `@ユーザー名` に組み立て、抜粋を本文にする。任意の見出しやタップ先 URL を受けない。プレビューは APNs と遅延再送用 Queue に渡り、D1 とログには保存しない。
-  - プレビューがある場合、`mutable-content` を付け、`actor` (`username`、任意の `name` と `image`) を入れる。アプリの通知拡張が、送った人の Communication Notifications として作り直す (2026-11-12、オーナーの判断。tweetbot と notification-docs の ADR-0006)。見出しと本文は残すので、通知拡張が動かないときは今までどおりに出る。表示名とアイコンは、`author` と同じく公開アカウントのものだけで、保存しない。
+  - プレビューがある場合、`mutable-content` を付け、`actor` (`username`、任意の `name` と `image`) を入れる。アプリの通知拡張が、送った人の Communication Notifications として作り直す (2026-11-12、オーナーの判断。ツイートのプレビューの決まりは notification-docs の ADR-0005、DM は ADR-0006)。見出しと本文は残すので、通知拡張が動かないときは今までどおりに出る。表示名とアイコンは、`author` と同じく公開アカウントのものだけで、保存しない。
   - アプリは `loc-key` の訳を持ち、`post_id` を確かめてから、X の決まった画面だけを開く (IOS-001)。iOS は `loc-key` をアプリ本体の bundle から引くので、訳はアプリのターゲットに置く (Tweetbot の画面の訳がある TweetbotUI パッケージではない)。
 
 ### 回数の制限

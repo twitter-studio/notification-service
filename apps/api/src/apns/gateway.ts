@@ -14,6 +14,7 @@ import {
   NotificationActor,
   NotificationAlert,
   NotificationRouteID,
+  PREVIEW_EVENT_TYPES,
 } from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
@@ -45,8 +46,7 @@ const Payload = z
     if (hasActor)
       return (
         !hasPreview &&
-        payload.event_type !== "dm" &&
-        payload.event_type !== "follow" &&
+        PREVIEW_EVENT_TYPES.has(payload.event_type) &&
         "title" in payload.aps.alert &&
         payload.aps.alert.title === `@${payload.actor?.username}`
       );

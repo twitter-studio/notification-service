@@ -16,6 +16,14 @@ export const EVENT_TYPES = [
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
+/** 公開ツイートのプレビュー (と送った人の actor) を付けてよい種類。フォローと DM には付けない。 */
+export const PREVIEW_EVENT_TYPES: ReadonlySet<EventType | "test"> = new Set([
+  "mention",
+  "reply",
+  "quote",
+  "retweet",
+  "like",
+]);
 
 export const NotificationRouteID = z.uuid().brand<"NotificationRouteID">();
 export type NotificationRouteID = z.infer<typeof NotificationRouteID>;
@@ -25,18 +33,24 @@ export const PreviewExcerpt = z
   .string()
   .min(1)
   .max(280)
-  .refine((value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Bidi_Control}]/u.test(value));
+  .refine(
+    (value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Zl}\p{Zp}\p{Bidi_Control}]/u.test(value),
+  );
 /** 公開アカウントの表示名。題には出さず、通知拡張が送った人の名前に使う。 */
 export const PreviewDisplayName = z
   .string()
   .min(1)
   .max(100)
-  .refine((value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Bidi_Control}]/u.test(value));
+  .refine(
+    (value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Zl}\p{Zp}\p{Bidi_Control}]/u.test(value),
+  );
 /** 公開アカウントのアイコン。通知拡張がこの URL から画像を取るので、X の画像の配信元の https の URL だけを受ける。 */
 export const PreviewImage = z
   .string()
   .max(512)
   .refine((value) => {
+    // 末尾が空の `?` や `#` も、クエリやフラグメントとして受けない。
+    if (value.includes("?") || value.includes("#")) return false;
     try {
       const url = new URL(value);
       return (
@@ -144,7 +158,7 @@ export type NotificationPayload = {
 };
 
 export function notificationPayload(event: RelayEvent): NotificationPayload {
-  const preview = event.type === "follow" || event.type === "dm" ? undefined : event.preview;
+  const preview = PREVIEW_EVENT_TYPES.has(event.type) ? event.preview : undefined;
   const dmPreview =
     event.type === "dm" && event.routeId !== undefined && event.sealedDmPreview !== undefined
       ? { event_id: event.eventId, sealed: event.sealedDmPreview }
