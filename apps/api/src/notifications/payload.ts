@@ -26,9 +26,45 @@ export const PreviewExcerpt = z
   .min(1)
   .max(280)
   .refine((value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Bidi_Control}]/u.test(value));
+/** 公開アカウントの表示名。題には出さず、通知拡張が送った人の名前に使う。 */
+export const PreviewDisplayName = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine((value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Bidi_Control}]/u.test(value));
+/** 公開アカウントのアイコン。通知拡張がこの URL から画像を取るので、X の画像の配信元の https の URL だけを受ける。 */
+export const PreviewImage = z
+  .string()
+  .max(512)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        url.href === value &&
+        url.protocol === "https:" &&
+        url.hostname === "pbs.twimg.com" &&
+        url.port === "" &&
+        url.username === "" &&
+        url.password === "" &&
+        url.pathname.startsWith("/profile_images/") &&
+        url.search === "" &&
+        url.hash === ""
+      );
+    } catch {
+      return false;
+    }
+  });
 export const NotificationPreview = z.strictObject({
   author: PreviewHandle,
   excerpt: PreviewExcerpt,
+  author_name: PreviewDisplayName.optional(),
+  author_image: PreviewImage.optional(),
+});
+/** 通知拡張が Communication Notifications の送った人を作るための、公開アカウントの情報。 */
+export const NotificationActor = z.strictObject({
+  username: PreviewHandle,
+  name: PreviewDisplayName.optional(),
+  image: PreviewImage.optional(),
 });
 type NotificationPreview = z.infer<typeof NotificationPreview>;
 
@@ -104,6 +140,7 @@ export type NotificationPayload = {
   post_id?: string;
   route_id?: NotificationRouteID;
   dm_preview?: z.infer<typeof DmPreviewPayload>;
+  actor?: z.infer<typeof NotificationActor>;
 };
 
 export function notificationPayload(event: RelayEvent): NotificationPayload {
@@ -126,11 +163,22 @@ export function notificationPayload(event: RelayEvent): NotificationPayload {
               }
             : { title: `@${preview.author}`, body: preview.excerpt },
       sound: "default",
-      ...(dmPreview === undefined ? {} : { "mutable-content": 1 }),
+      // 通知拡張は、DM の暗号文を開くときと、プレビューの送った人で通知を作り直すときに動く。
+      // 題と本文はそのまま残すので、通知拡張が動かなくても今までどおりに出る。
+      ...(dmPreview === undefined && preview === undefined ? {} : { "mutable-content": 1 }),
     },
     event_type: event.type,
     ...(event.postId === undefined ? {} : { post_id: event.postId }),
     ...(event.routeId === undefined ? {} : { route_id: event.routeId }),
     ...(dmPreview === undefined ? {} : { dm_preview: dmPreview }),
+    ...(preview === undefined
+      ? {}
+      : {
+          actor: {
+            username: preview.author,
+            ...(preview.author_name === undefined ? {} : { name: preview.author_name }),
+            ...(preview.author_image === undefined ? {} : { image: preview.author_image }),
+          },
+        }),
   };
 }
