@@ -21,7 +21,7 @@
 | `CF_QUEUE_ID`           | 既存Queueの32桁hex ID。名前とbindingも照合する     |
 | `D1_DATABASE_ID`        | 既存D1のUUID。2つのEnvironmentに同じ対象を設定する |
 
-運営のWorker名とD1名は `notification-service`、Queue名は `notification-apns-retries`。招待制・developmentを維持する。配置前は既存KCV・許可バージョンを保った追加だけを認め、配置後は対象設定との完全一致を求める。
+運営のWorker名とD1名は `notification-service`、Queue名は `notification-apns-retries`。招待制・developmentを維持する。sandbox の通常更新では、同じ mode・environment・App ID と妥当な許可ビルド一覧を検証した稼働中の App Attest 設定を、そのまま配置して照合する。許可版の追加・削除は通常更新に含めない (#88)。配置前は既存KCV・許可バージョンを保った追加だけを認め、配置後は対象設定との完全一致を求める。
 
 `sandbox` tokenは対象アカウント・WorkerのEditorと既存Queue consumer更新、必要なD1 Readに絞る。`sandbox-migrations` tokenは対象D1のEditだけとし、WorkersやQueuesの書き込み権限を加えない。個別リソースへのscopeが使える場合は限定し、実際の発行画面で確認する。
 

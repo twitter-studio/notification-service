@@ -48,6 +48,7 @@ const publicEnv = {
 };
 function fixture({
   mutate = () => {},
+  inspectWritten = () => {},
   versionID = version,
   dirty = false,
   migrate = false,
@@ -253,6 +254,7 @@ function fixture({
       assert.equal(command, "pnpm");
       mutations++;
       const written = JSON.parse(readFileSync(args.at(-1), "utf8"));
+      inspectWritten(written);
       assert.equal(written.preview_urls, false);
       if (publicProduction) assert.deepEqual(written.vars, config.vars);
       assert.equal(written.name, targetEnv.WORKER_NAME);
@@ -542,6 +544,40 @@ test("公開productionは廃止した検証用の鍵の確認値がないか、�
     await assert.rejects(executeDeployment(env, f));
   }
   assert.equal(f.count(), 0);
+});
+
+test("sandboxの通常更新は検証した稼働中のApp Attest許可版を配置と照合の両方で保つ", async () => {
+  const versions = ["7", "4"];
+  const f = fixture({
+    mutate(url, settings) {
+      if (!url.pathname.match(/\/(settings|versions\/[^/]+)$/)) return;
+      const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+      binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: versions });
+    },
+    inspectWritten(config) {
+      assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY).bundleVersions, versions);
+    },
+  });
+  assert.equal((await executeDeployment(f.env, f)).status, "sandbox_deployed");
+  assert.equal(f.count(), 1);
+});
+
+test("sandboxの異なるApp IDや不正な許可版は配置前に拒否する", async () => {
+  for (const changes of [
+    { appId: "PU5HXZ4FZ2.com.example.other" },
+    { bundleVersions: [] },
+    { bundleVersions: [7] },
+  ]) {
+    const f = fixture({
+      mutate(url, settings) {
+        if (!url.pathname.endsWith("/settings")) return;
+        const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
+        binding.text = JSON.stringify({ ...JSON.parse(binding.text), ...changes });
+      },
+    });
+    await assert.rejects(executeDeployment(f.env, f));
+    assert.equal(f.count(), 0);
+  }
 });
 
 for (const [mode, status] of [
