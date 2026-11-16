@@ -25,6 +25,20 @@ export async function enforceRateLimit(limiter: RateLimit, key: string): Promise
   }
 }
 
+/** cross-zone Worker は固定 IP になるため、Cloudflare が付ける所有 zone で分ける (ADR-0006)。 */
+export function authenticationSourceKey(request: Request): string {
+  const ip = request.headers.get("CF-Connecting-IP") ?? "";
+  const groups = parseIpv6(ip);
+  const isCrossZone =
+    groups?.map((part) => part.toString(16)).join(":") === "2a06:98c0:3600:0:0:0:0:103";
+  if (!isCrossZone) return clientAddressKey(request);
+  const zone = request.headers.get("CF-Worker")?.toLowerCase();
+  if (zone === undefined || zone.length > 253 || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(zone)) {
+    return "worker:unknown";
+  }
+  return `worker:${zone}`;
+}
+
 /**
  * 名前を名乗らない入口 (チャレンジ、登録、セッションの作り直し) で数える単位。Cloudflare が付ける接続元の IP。
  * Rate Limiting の文書は、IP は多くの人で共有されうるので単位に勧めていないが、この入口には、ほかに数える単位がない。

@@ -5,10 +5,13 @@ import { problem } from "../problem";
 import { appAttestPolicy } from "../security/app-attest/registration";
 import { hashBearerToken } from "../security/bearer";
 
+import { authenticationSourceKey, enforceRateLimit } from "../security/rate-limit";
+
 const SESSION_TOKEN = /^Bearer (tss_[A-Za-z0-9_-]{43})$/;
 
 /** アカウントのセッション (`Authorization: Bearer tss_…`) を確かめ、`c.get("session")` に置く。確かめられなければ 401。 */
 export const requireSession = createMiddleware<SessionEnv>(async (c, next) => {
+  await enforceRateLimit(c.env.AUTH_RATE_LIMITER, authenticationSourceKey(c.req.raw));
   const policy = appAttestPolicy(c.env);
   const token = SESSION_TOKEN.exec(c.req.header("Authorization") ?? "")?.[1];
   const session =

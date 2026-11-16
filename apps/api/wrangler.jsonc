@@ -19,6 +19,12 @@
   // (使っている番号は ADR-0006 に書く)。
   "ratelimits": [
     {
+      // 認証用の D1 検索の前。セッションと中継を、接続元ごとに合わせて数える。
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "1005",
+      "simple": { "limit": 120, "period": 60 }
+    },
+    {
       // 接続元の IP (IPv6 は /64) ごと。チャレンジ、登録、セッションの作り直しを合わせて数える (1 回の登録で 2 回)。
       "name": "CLIENT_RATE_LIMITER",
       "namespace_id": "1001",
