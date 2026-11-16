@@ -61,7 +61,7 @@ Status: Accepted / 2026-11-04
     - IPv6 は /64 にまとめて数える。回線や VPS は 1 人に /64 以上を配るので、アドレスを変えるだけで越えさせないため。家庭の回線は /56 や /48 を配ることも多く、その人は /64 を変えて越えられる。書き込みに届くのは招待のコードを持つ人だけなので、今は /64 で足りるとし、越える人が出たら /48 で数える 2 つ目の制限を足す。
     - IPv4 を写した IPv6 (`::ffff:0:0/96`) と NAT64 (`64:ff9b::/96`) は、書き方によらず IPv4 として数える。前の 64 ビットが 0 のアドレス (IPv4 互換、ループバックなど) はまとめない。まとめると、ほかの書き方で届いた IPv4 の人が 1 つの単位を分け合い、1 人で全員の登録を止められる (Cloudflare は IPv4 の人を `192.0.2.1` の形で送るので、今は届かない)。
   - インストールごと (`INSTALLATION_RATE_LIMITER`): 署名を確かめたあとにセッションを作るもの (セッションの作り直しと、同じ鍵での登録し直し) を合わせて、1 分に 5 回。署名の後に数えて、ほかの人にその枠を使わせない。中継の資格情報の入れ替えと取り消しも、このバインディングで、別の単位として数える (ADR-0007)。
-  - `namespace_id` は、Cloudflare のアカウントの中で共有される。notification-service は 1001、1002、1003 (ADR-0008)、1004 (ADR-0009) を使う。同じアカウントに置くほかの Worker (staging、オーナーが試す notification-worker など) には、別の番号を付ける。
+  - `namespace_id` は、Cloudflare のアカウントの中で共有される。notification-service は 1001、1002、1003 (ADR-0008)、1004 (ADR-0009)、1005 (認証前の検索) を使う。同じアカウントに置くほかの Worker (staging、オーナーが試す notification-worker など) には、別の番号を付ける。
 - 数は Cloudflare の場所ごとのおおよその数で、少し超えることがある。総当たりと、D1 の書き込みの使い切りを遅らせるためのもの。招待のコードの総当たりは、コードの長さ (128 ビット以上) で防ぐ。
 - 手元のテスト (Miniflare) でも数える。テストは要求ごとに違う IP (`CF-Connecting-IP`) を付ける。
 - 無料のプランで使えるかは、2026-11 の公式の文書 (バインディングの説明、料金、GA の告知) に書かれていない。本番の Worker を作る前に、オーナーが確かめる (`wrangler deploy --dry-run` では分からない)。
@@ -99,3 +99,11 @@ Status: Accepted / 2026-11-04
 ## AUTH-003による更新
 
 App Attestの初回証明、再登録とセッション更新のassertion、招待制からの切り替えは[ADR-0014](0014-app-attest.md)で定める。以下の試作時の制限は、ADR-0014の`invite_only`モードに適用する。
+
+## 認証用の検索の前の制限 (2026-11-16、#84)
+
+セッションと中継の資格情報の認証前に、`AUTH_RATE_LIMITER` (namespace 1005) で接続元ごとに 120 回/60 秒に制限する。IPv6 は既存の `clientAddressKey` で /64 にまとめる。登録の 20 回/分とは分け、同じ回線の複数端末と、同じ送信元からの複数アカウントの中継を許容する。認証後のアカウント単位の 30 回/分と日次上限は維持する。拒否時は D1 を検索せず、429 と `Retry-After: 60` を返す。
+
+Cloudflare の場所ごとの近似制限であり、分散した接続元を含む総要求数や費用の厳密な上限ではない。WAF の設定・実際の配置と稼働確認は #84 と notification-docs#66 に別に記録する。[Cloudflare の仕様](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/) を 2026-11-16 に確認。
+
+Cloudflare の cross-zone Worker subrequest の `CF-Connecting-IP` は固定の `2a06:98c0:3600::103` になる。この値のときは IP を使わず、Cloudflare が全 `fetch` subrequest に付ける `CF-Worker` の所有 zone で数える。workers.dev のアカウントや同じ zone の複数 Worker は枠を共有する。通常の IP から渡された `CF-Worker` は識別に使わない。固定 IP なのに zone が読めない要求は `worker:unknown` の共通枠で制限し、無制限に通さない。ゾーンを大量に作る攻撃は止められない。仕様と workers.dev の挙動は [Cloudflare のヘッダーの文書](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-worker) と [workers-sdk#4367](https://github.com/cloudflare/workers-sdk/issues/4367) を参照。実際の稼働環境でのヘッダー照合は配置後の必須確認とする。

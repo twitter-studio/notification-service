@@ -434,7 +434,7 @@ test("公開productionの初期配置は専用資源を使い、登録と配送�
   assert.equal(config.queues.producers[0].queue, "notification-apns-production");
   assert.deepEqual(
     config.ratelimits.map((limit) => limit.namespace_id),
-    ["1201", "1202", "1203", "1204"],
+    ["1205", "1201", "1202", "1203", "1204"],
   );
   assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY), {
     appId: "PU5HXZ4FZ2.com.twitter-studio.Tweetbot",

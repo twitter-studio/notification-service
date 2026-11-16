@@ -8,6 +8,8 @@ import type { RelayEnv } from "../app";
 import { problem } from "../problem";
 import { hashBearerToken } from "../security/bearer";
 
+import { authenticationSourceKey, enforceRateLimit } from "../security/rate-limit";
+
 const RELAY_TOKEN = /^Bearer (tsr_[A-Za-z0-9_-]{43})$/;
 
 /**
@@ -16,6 +18,7 @@ const RELAY_TOKEN = /^Bearer (tsr_[A-Za-z0-9_-]{43})$/;
  * トークンはハッシュにして DB の索引で引く。256 ビットの乱数なので、引く時間からハッシュの一部が分かっても、元の値は探せない。
  */
 export const requireRelayCredential = createMiddleware<RelayEnv>(async (c, next) => {
+  await enforceRateLimit(c.env.AUTH_RATE_LIMITER, authenticationSourceKey(c.req.raw));
   const token = RELAY_TOKEN.exec(c.req.header("Authorization") ?? "")?.[1];
   const db = createDb(c.env.DB);
   const credential =
