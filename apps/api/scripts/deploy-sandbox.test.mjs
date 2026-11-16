@@ -546,16 +546,16 @@ test("公開productionは廃止した検証用の鍵の確認値がないか、�
   assert.equal(f.count(), 0);
 });
 
-test("sandboxの通常更新は検証した稼働中のApp Attest許可版を配置と照合の両方で保つ", async () => {
+test("sandboxの通常更新は廃止済み許可版を外し現行設定で配置と照合を行う", async () => {
   const versions = ["7", "4"];
   const f = fixture({
     mutate(url, settings) {
-      if (!url.pathname.match(/\/(settings|versions\/[^/]+)$/)) return;
+      if (!url.pathname.endsWith("/settings") || f.count() !== 0) return;
       const binding = settings.bindings.find(({ name }) => name === "APP_ATTEST_POLICY");
       binding.text = JSON.stringify({ ...JSON.parse(binding.text), bundleVersions: versions });
     },
     inspectWritten(config) {
-      assert.deepEqual(JSON.parse(config.vars.APP_ATTEST_POLICY).bundleVersions, versions);
+      assert.equal(JSON.parse(config.vars.APP_ATTEST_POLICY).bundleVersions, undefined);
     },
   });
   assert.equal((await executeDeployment(f.env, f)).status, "sandbox_deployed");

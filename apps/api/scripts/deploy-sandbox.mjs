@@ -407,13 +407,6 @@ export async function executeDeployment(
         publicPreflight: publicProduction,
         attestPreflight: true,
       });
-      if (!publicProduction && !migration) {
-        const policy = settings.bindings.find(
-          (binding) => binding.name === "APP_ATTEST_POLICY" && binding.type === "plain_text",
-        );
-        // #88: 許可版の変更は通常更新に含めず、上で検証した稼働設定を保つ。
-        config.vars.APP_ATTEST_POLICY = policy.text;
-      }
     }
     const details = await stateApi(queue);
     if (publicProduction) checkPublicQueue(details, config, input.CF_QUEUE_ID, bootstrap);
