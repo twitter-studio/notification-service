@@ -19,7 +19,7 @@ import { readRelayToken, runRelayLoad } from "./relay-load.mjs";
 
 const token = `tsr_${"a".repeat(43)}`;
 
-function fixture(overrides = new Map()) {
+function fixture(overrides = new Map(), freshEvents = false) {
   const records = [];
   const calls = [];
   let concurrent = 0;
@@ -27,6 +27,7 @@ function fixture(overrides = new Map()) {
   let waits = 0;
   const options = {
     token,
+    freshEvents,
     record: async (value) => records.push(value),
     wait: async () => {
       waits++;
@@ -49,7 +50,10 @@ function fixture(overrides = new Map()) {
       return (
         override ??
         Response.json(
-          { event_id: body.event_id, status: sequence === 2 ? "accepted" : "duplicate" },
+          {
+            event_id: body.event_id,
+            status: sequence === 2 || (freshEvents && sequence > 3) ? "accepted" : "duplicate",
+          },
           { status: sequence === 1 ? 422 : 202, headers: { "x-request-id": randomUUID() } },
         )
       );
@@ -169,4 +173,24 @@ test("正規化した台帳の既存ファイルを守り、共有ディレク�
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("新規の測定は受理10件・重複1件・拒否1件で、並列化しない", async () => {
+  const { records, calls, options, counts } = fixture(new Map(), true);
+  assert.equal(await runRelayLoad(options), true);
+  assert.equal(calls.length, 12);
+  assert.deepEqual(counts(), { maxConcurrent: 1, waits: 9 });
+  const accepted = calls.filter((_, index) => index === 1 || index > 2);
+  assert.equal(new Set(accepted.map((call) => call.body.event_id)).size, 10);
+  assert.equal(calls[1].body.event_id, calls[2].body.event_id);
+  assert.equal(records.filter((r) => r.outcome === "accepted").length, 10);
+  assert.equal(records.filter((r) => r.outcome === "duplicate").length, 1);
+  assert.equal(records.filter((r) => r.outcome === "rejected").length, 1);
+  assert.ok(!JSON.stringify(records).includes(token));
+});
+
+test("新規の測定でも429を受けたら再試行せず停止する", async () => {
+  const { calls, options } = fixture(new Map([[4, new Response(null, { status: 429 })]]), true);
+  assert.equal(await runRelayLoad(options), false);
+  assert.equal(calls.length, 4);
 });

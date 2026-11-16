@@ -53,6 +53,7 @@ async function relayResult(response, expected, eventId) {
 export async function runRelayLoad({
   token,
   record,
+  freshEvents = false,
   send = fetch,
   wait = (signal) => delay(INTERVAL_MS, undefined, { signal }),
   signal = AbortSignal.timeout(RUN_TIMEOUT_MS),
@@ -70,6 +71,10 @@ export async function runRelayLoad({
     await record({ stage: "reserved", expected, first: reserved + 1, count });
     reserved += count;
     signal.throwIfAborted();
+    if (freshEvents && expected === "accepted") {
+      event.event_id = `qa003-fresh-${randomUUID()}`;
+      event.occurred_at = new Date().toISOString();
+    }
     const body = JSON.stringify(expected === "rejected" ? {} : event);
     const results = await Promise.all(
       Array.from({ length: count }, async (_, index) => {
@@ -103,15 +108,28 @@ export async function runRelayLoad({
   if (!(await batch("accepted", 1))) return false;
   // 202 accepted だけでは、重複の記録が完了したか分からない。
   if (!(await batch("duplicate", 1))) return false;
-  for (let pair = 0; pair < PAIRS; pair++) {
-    await wait(signal);
-    if (!(await batch("duplicate", 2))) return false;
+  if (freshEvents) {
+    // 受理 10 件、重複 1 件、拒否 1 件。新規イベントごとの DB と配送の処理を測る。
+    for (let index = 0; index < 9; index++) {
+      await wait(signal);
+      if (!(await batch("accepted", 1))) return false;
+    }
+  } else {
+    for (let pair = 0; pair < PAIRS; pair++) {
+      await wait(signal);
+      if (!(await batch("duplicate", 2))) return false;
+    }
   }
   return true;
 }
 
 async function main([execute, tokenPath, ledgerPath, ...extra]) {
-  if (execute !== "--execute-sandbox" || !tokenPath || !ledgerPath || extra.length)
+  if (
+    !["--execute-sandbox", "--execute-sandbox-fresh"].includes(execute) ||
+    !tokenPath ||
+    !ledgerPath ||
+    extra.length
+  )
     throw new Error("explicit_sandbox_execution_required");
   const requestedLedger = resolve(ledgerPath);
   const ledgerDirectory = await realpath(dirname(requestedLedger));
@@ -124,7 +142,11 @@ async function main([execute, tokenPath, ledgerPath, ...extra]) {
     await ledger.sync();
   };
   try {
-    const complete = await runRelayLoad({ token, record });
+    const complete = await runRelayLoad({
+      token,
+      record,
+      freshEvents: execute === "--execute-sandbox-fresh",
+    });
     await record({ stage: "finished", complete });
     if (!complete) process.exitCode = 1;
   } finally {
