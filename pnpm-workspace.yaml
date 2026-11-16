@@ -7,3 +7,6 @@ minimumReleaseAge: 4320
 allowBuilds:
   esbuild: false
   workerd: false
+# #86: 開発サーバーの CORS の脆弱版を残さない。上流が修正版を要求するようになったら外す。
+overrides:
+  '@esbuild-kit/core-utils>esbuild': 0.25.12
