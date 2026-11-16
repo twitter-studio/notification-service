@@ -21,7 +21,7 @@
 | `CF_QUEUE_ID`           | 既存Queueの32桁hex ID。名前とbindingも照合する     |
 | `D1_DATABASE_ID`        | 既存D1のUUID。2つのEnvironmentに同じ対象を設定する |
 
-運営のWorker名とD1名は `notification-service`、Queue名は `notification-apns-retries`。招待制・developmentを維持する。配置前は既存KCV・許可バージョンを保った追加だけを認め、配置後は対象設定との完全一致を求める。
+運営のWorker名とD1名は `notification-service`、Queue名は `notification-apns-retries`。招待制・developmentを維持する。App Attest の `bundleVersions` は PR #75 で廃止した設定で、現行 runtime は受け付けない。sandbox の通常更新では、同じ mode・environment・App ID と妥当な旧許可版を確認してから、廃止済みの欄を外した現行設定を配置する。旧許可版をそのまま引き継がない (#88)。配置前は既存KCVを保った追加だけを認め、配置後は対象設定との完全一致を求める。
 
 `sandbox` tokenは対象アカウント・WorkerのEditorと既存Queue consumer更新、必要なD1 Readに絞る。`sandbox-migrations` tokenは対象D1のEditだけとし、WorkersやQueuesの書き込み権限を加えない。個別リソースへのscopeが使える場合は限定し、実際の発行画面で確認する。
 
