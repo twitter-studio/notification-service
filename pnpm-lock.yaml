@@ -27,8 +27,8 @@ importers:
         specifier: 4.0.0
         version: 4.0.0
       cborg:
-        specifier: 6.2.1
-        version: 6.2.1
+        specifier: 7.0.0
+        version: 7.0.0
       hono:
         specifier: 4.13.17
         version: 4.13.17
@@ -1019,8 +1019,8 @@ packages:
     resolution: {integrity: sha512-QJYdJHpGNj4dAfRrgQAu8V5OEFVgiALJ8YFR4c1BuNYzvoDU86yEg+9SXu/AbGyMaLAn17qdMmwsCc2Ry2nHPg==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  cborg@6.2.1:
-    resolution: {integrity: sha512-DwiF3Jd5RW6kJuTQMzQb/sdZD03utp15EcQNOMTvE/ZYCdDPzETsGOY5lj8imKxbsEuYvOzcMSiKLiT4C2/2Lw==}
+  cborg@7.0.0:
+    resolution: {integrity: sha512-YYXJ+ozY26INm46oz2P+iOww/LhrfgPz2CuHaskDcitt0rKyh6LlWhNCfMlxxcdD+k7m0TspkRvcPPXAGYzZ8w==}
     hasBin: true
 
   chai@6.3.0:
@@ -2070,7 +2070,7 @@ snapshots:
 
   bytestreamjs@3.0.0: {}
 
-  cborg@6.2.1: {}
+  cborg@7.0.0: {}
 
   chai@6.3.0: {}
 
