@@ -164,8 +164,11 @@ export type NotificationPayload = {
   follower_username?: string;
 };
 
+// 既存の Worker は接続テストに follow を使う。X のフォローとはイベント ID の名前空間で区別する。
+const PairingTestEventID = z.templateLiteral(["pairing_test_", z.uuidv4()]);
+
 export function notificationPayload(event: RelayEvent): NotificationPayload {
-  if (event.type === "follow") {
+  if (event.type === "follow" && !PairingTestEventID.safeParse(event.eventId).success) {
     return {
       aps: {
         alert: { title: "Tweetbot", "loc-key": "You have a new notification." },
