@@ -513,22 +513,30 @@ describe("中継の受け付け", () => {
     );
   });
 
-  it("follow は post_id なしで受け、通知にも post_id を入れない", async () => {
-    const { app, sent } = appWithPush();
-    const alice = await accountWithDevice();
+  it.each(["ExampleUser", undefined])(
+    "follow の通知にフォローした人を渡す (%s)",
+    async (username) => {
+      const { app, sent } = appWithPush();
+      const alice = await accountWithDevice();
 
-    const response = await relay(
-      app,
-      alice.enrolled.relay_secret,
-      newEvent({ type: "follow", post_id: undefined }),
-    );
+      const response = await relay(
+        app,
+        alice.enrolled.relay_secret,
+        newEvent({ type: "follow", post_id: undefined, follower_username: username }),
+      );
 
-    expect(response.status).toBe(202);
-    expect(sent[0]?.notification.payload).toEqual({
-      aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
-      event_type: "follow",
-    });
-  });
+      expect(response.status).toBe(202);
+      expect(sent[0]?.notification.payload).toEqual({
+        aps: {
+          alert: { title: "Tweetbot", "loc-key": "You have a new notification." },
+          sound: "default",
+          "mutable-content": 1,
+        },
+        event_type: "follow",
+        ...(username === undefined ? {} : { follower_username: username }),
+      });
+    },
+  );
 
   it("処理中のまま 2 分を過ぎた記録は、やり直しで引き継いで送る", async () => {
     const { app, sent } = appWithPush();
