@@ -200,6 +200,24 @@ describe("APNs の遅延再送", () => {
     expect(test.send).toHaveBeenCalledTimes(1);
   });
 
+  it("フォローした人のユーザー名を Queue から再送する", async () => {
+    const account = await accountWithDevice();
+    const test = await setup(429);
+    const outgoing = notification();
+    outgoing.payload = notificationPayload({
+      eventId: "follow",
+      type: "follow",
+      followerUsername: "ExampleUser",
+    });
+    expect(
+      await test.gateway.push(account.target, outgoing, { signal: new AbortController().signal }),
+    ).toEqual({ kind: "queued" });
+    await consume(test.gateway, test.jobs[0], 1);
+    expect(test.send).toHaveBeenCalledTimes(2);
+    const [, retried] = test.send.mock.calls[1] ?? [];
+    expect(JSON.parse(String(retried?.body))).toEqual(outgoing.payload);
+  });
+
   it("DM の暗号文と定型文を Queue から再送する", async () => {
     const account = await accountWithDevice();
     const test = await setup(429);
@@ -311,7 +329,12 @@ describe("APNs の遅延再送", () => {
             : { kind, installationId: account.owner.installationId },
       };
       const outgoing = notification();
-      if (kind === "installation") outgoing.payload.event_type = "test";
+      if (kind === "installation") {
+        outgoing.payload = {
+          aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
+          event_type: "test",
+        };
+      }
       expect(
         await test.gateway.push(target, outgoing, { signal: new AbortController().signal }),
       ).toEqual({ kind: "queued" });

@@ -101,6 +101,7 @@ export type RelayEvent = {
   postId?: string | undefined;
   routeId?: NotificationRouteID | undefined;
   preview?: NotificationPreview | undefined;
+  followerUsername?: string | undefined;
   sealedDmPreview?: string | undefined;
 };
 
@@ -142,7 +143,12 @@ export const DmPreviewFallbackAlert = z.strictObject({
   title: z.literal("Tweetbot"),
   "loc-key": z.literal("You have a new direct message."),
 });
+export const FollowFallbackAlert = z.strictObject({
+  title: z.literal("Tweetbot"),
+  "loc-key": z.literal("You have a new notification."),
+});
 export const NotificationAlert = z.union([
+  FollowFallbackAlert,
   DmPreviewFallbackAlert,
   z.strictObject({ "loc-key": NotificationMessage }),
   z.strictObject({ title: z.string().regex(/^@[A-Za-z0-9_]{1,15}$/), body: PreviewExcerpt }),
@@ -155,9 +161,24 @@ export type NotificationPayload = {
   route_id?: NotificationRouteID;
   dm_preview?: z.infer<typeof DmPreviewPayload>;
   actor?: z.infer<typeof NotificationActor>;
+  follower_username?: string;
 };
 
 export function notificationPayload(event: RelayEvent): NotificationPayload {
+  if (event.type === "follow") {
+    return {
+      aps: {
+        alert: { title: "Tweetbot", "loc-key": "You have a new notification." },
+        sound: "default",
+        "mutable-content": 1,
+      },
+      event_type: "follow",
+      ...(event.routeId === undefined ? {} : { route_id: event.routeId }),
+      ...(event.followerUsername === undefined
+        ? {}
+        : { follower_username: event.followerUsername }),
+    };
+  }
   const preview = PREVIEW_EVENT_TYPES.has(event.type) ? event.preview : undefined;
   const dmPreview =
     event.type === "dm" && event.routeId !== undefined && event.sealedDmPreview !== undefined

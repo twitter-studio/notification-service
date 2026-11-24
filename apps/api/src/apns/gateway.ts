@@ -11,10 +11,12 @@ import {
   DmPreviewFallbackAlert,
   DmPreviewPayload,
   EVENT_TYPES,
+  FollowFallbackAlert,
   NotificationActor,
   NotificationAlert,
   NotificationRouteID,
   PREVIEW_EVENT_TYPES,
+  PreviewHandle,
 } from "../notifications/payload";
 import type { PushGateway } from "../notifications/push";
 import { loadDeviceTokenKeys, openDeviceToken } from "../security/device-token";
@@ -38,10 +40,14 @@ const Payload = z
     route_id: NotificationRouteID.optional(),
     dm_preview: DmPreviewPayload.optional(),
     actor: NotificationActor.optional(),
+    follower_username: PreviewHandle.optional(),
   })
   .refine((payload) => {
     const hasPreview = payload.dm_preview !== undefined;
     const hasActor = payload.actor !== undefined;
+    if (payload.event_type === "follow" && payload.aps["mutable-content"] === 1)
+      return !hasPreview && !hasActor && FollowFallbackAlert.safeParse(payload.aps.alert).success;
+    if (payload.follower_username !== undefined) return false;
     if ((hasPreview || hasActor) !== (payload.aps["mutable-content"] === 1)) return false;
     if (hasActor)
       return (
