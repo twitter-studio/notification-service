@@ -16,7 +16,7 @@ export const EVENT_TYPES = [
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
-/** 公開ツイートのプレビュー (と送った人の actor) を付けてよい種類。フォローと DM には付けない。 */
+/** 投稿のプレビュー (と送った人の actor) を付けてよい種類。フォローと DM には付けない。 */
 export const PREVIEW_EVENT_TYPES: ReadonlySet<EventType | "test"> = new Set([
   "mention",
   "reply",
@@ -36,7 +36,7 @@ export const PreviewExcerpt = z
   .refine(
     (value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Zl}\p{Zp}\p{Bidi_Control}]/u.test(value),
   );
-/** 公開アカウントの表示名。題には出さず、通知拡張が送った人の名前に使う。 */
+/** 通知を起こしたアカウントの表示名。題には出さず、通知拡張が送った人の名前に使う。 */
 export const PreviewDisplayName = z
   .string()
   .min(1)
@@ -44,7 +44,7 @@ export const PreviewDisplayName = z
   .refine(
     (value) => value.trim() === value && !/[\p{Cc}\p{Cs}\p{Zl}\p{Zp}\p{Bidi_Control}]/u.test(value),
   );
-/** 公開アカウントのアイコン。通知拡張がこの URL から画像を取るので、X の画像の配信元の https の URL だけを受ける。 */
+/** 通知を起こしたアカウントのアイコン。通知拡張がこの URL から画像を取るので、X の画像の配信元の https の URL だけを受ける。 */
 export const PreviewImage = z
   .string()
   .max(512)
@@ -74,7 +74,7 @@ export const NotificationPreview = z.strictObject({
   author_name: PreviewDisplayName.optional(),
   author_image: PreviewImage.optional(),
 });
-/** 通知拡張が Communication Notifications の送った人を作るための、公開アカウントの情報。 */
+/** 通知拡張が Communication Notifications の送った人を作るための、通知を起こしたアカウントの情報。 */
 export const NotificationActor = z.strictObject({
   username: PreviewHandle,
   name: PreviewDisplayName.optional(),
