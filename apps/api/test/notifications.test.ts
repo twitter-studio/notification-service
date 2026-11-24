@@ -538,6 +538,30 @@ describe("中継の受け付け", () => {
     },
   );
 
+  it("Worker の接続テスト通知は汎用文言で送る", async () => {
+    const { app, sent } = appWithPush();
+    const alice = await accountWithDevice();
+    const route_id = crypto.randomUUID();
+
+    const response = await relay(
+      app,
+      alice.enrolled.relay_secret,
+      newEvent({
+        event_id: `pairing_test_${crypto.randomUUID()}`,
+        type: "follow",
+        post_id: undefined,
+        route_id,
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(sent[0]?.notification.payload).toEqual({
+      aps: { alert: { "loc-key": "You have a new notification." }, sound: "default" },
+      event_type: "follow",
+      route_id,
+    });
+  });
+
   it("処理中のまま 2 分を過ぎた記録は、やり直しで引き継いで送る", async () => {
     const { app, sent } = appWithPush();
     const alice = await accountWithDevice();

@@ -77,7 +77,7 @@ const EventSchema = z
         "メンション・返信・引用ツイート・リツイート・いいねのみ。通知を起こした公開アカウントの @ を除いたユーザー名と、公開ツイート本文の抜粋。任意で、同じ公開アカウントの表示名 (author_name) と、アイコンの URL (author_image。https://pbs.twimg.com/profile_images/ の URL で、クエリとフラグメントなし) を付けられる。アプリの通知拡張が、送った人の Communication Notifications に使う",
     }),
     follower_username: PreviewHandle.optional().openapi({
-      description: "follow 専用。フォローした公開アカウントの @ を除いたユーザー名",
+      description: "follow 専用。フォロー元の @ を除いたユーザー名。公開・非公開の両方が対象",
     }),
     dm_preview: SealedDmPreview.optional().openapi({
       description: "DM 専用の暗号文。アカウントルートとイベント ID に結び付け、端末で復号する",
