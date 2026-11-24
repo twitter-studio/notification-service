@@ -14,7 +14,7 @@
   "dependencies": {
     "@hono/zod-openapi": "1.6.3",
     "@notification-service/db": "workspace:*",
-    "asn1js": "4.0.0",
+    "asn1js": "4.1.0",
     "cborg": "7.0.0",
     "hono": "4.13.18",
     "pkijs": "4.0.1",
