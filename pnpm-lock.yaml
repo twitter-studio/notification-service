@@ -24,8 +24,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/db
       asn1js:
-        specifier: 4.0.0
-        version: 4.0.0
+        specifier: 4.1.0
+        version: 4.1.0
       cborg:
         specifier: 7.0.0
         version: 7.0.0
@@ -34,7 +34,7 @@ importers:
         version: 4.13.18
       pkijs:
         specifier: 4.0.1
-        version: 4.0.1(asn1js@4.0.0)
+        version: 4.0.1(asn1js@4.1.0)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1001,8 +1001,8 @@ packages:
   '@vitest/spy@5.1.0':
     resolution: {integrity: sha512-2DPO5OMHWKrBngC+fCmTQqemNF0gidRhp3lxbBmRhW+M1XJrfgPpqNqWVevXtn2f2ufD5ZaR1B6B641aAlcX5A==}
 
-  asn1js@4.0.0:
-    resolution: {integrity: sha512-81NlooYbXCbBWL2+p1/ivGyT4AR2+bnfKYlPq/3rCoIPJSuLbdS8G70XYt561wOJnbaYfBS2HQDMENaX5hM2vA==}
+  asn1js@4.1.0:
+    resolution: {integrity: sha512-kcL7adqQpfp+n+18Hh43X5bmN97JSULs26OpJSycfQA6pWXxxPUgMZc+SqfmB3im32zno+u2qxCd7fTJxVai+A==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
   assertion-error@2.0.1:
@@ -2058,7 +2058,7 @@ snapshots:
 
   '@vitest/spy@5.1.0': {}
 
-  asn1js@4.0.0:
+  asn1js@4.1.0:
     dependencies:
       '@peculiar/utils': 4.1.0
 
@@ -2254,11 +2254,11 @@ snapshots:
 
   picomatch@4.0.7: {}
 
-  pkijs@4.0.1(asn1js@4.0.0):
+  pkijs@4.0.1(asn1js@4.1.0):
     dependencies:
       '@noble/hashes': 2.4.0
       '@peculiar/utils': 4.1.0
-      asn1js: 4.0.0
+      asn1js: 4.1.0
       bytestreamjs: 3.0.0
 
   postcss@8.5.32:
